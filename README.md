@@ -1,2 +1,2 @@
-# seohye-typo-rev2
+# seohye-typo
 
