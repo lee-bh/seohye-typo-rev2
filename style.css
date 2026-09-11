@@ -2,6 +2,13 @@
     --bg-color: #0f0f13;
     --text-color: #e0e0e0;
     --accent-color: #ffffff;
+    --muted-color: #a9b0b8;
+    /* Referenced by the modal fields and the loading indicator, which rendered
+       borderless and transparent while these were undefined. */
+    --card-bg: #1a1a20;
+    --glass-border: rgba(255, 255, 255, 0.15);
+    /* Kept in sync with ITEM_WIDTH in app.js, which packs the cards into rows. */
+    --item-width: 320px;
     --font-main: 'Outfit', sans-serif;
     --font-kr: 'Noto Sans KR', sans-serif;
 }
@@ -62,6 +69,20 @@ button {
     font-family: inherit;
 }
 
+/* .hidden is only ever styled per element below, so anything else carrying it
+   stayed visible -- the Delete button sat in the Add dialog because of it. */
+.danger-btn.hidden,
+.login-error.hidden,
+#login-overlay.hidden {
+    display: none;
+}
+
+/* The view/admin links in the header are anchors wearing the button styling. */
+a.icon-btn {
+    text-decoration: none;
+    font-size: 0.8rem;
+}
+
 .icon-btn {
     width: 36px;
     height: 36px;
@@ -110,6 +131,9 @@ button {
     height: 100vh;
     position: relative;
     cursor: grab;
+    /* Pan and pinch are handled in script; without this the browser claims the
+       gesture first and the timeline never sees a touch move. */
+    touch-action: none;
 }
 
 #timeline-container:active {
@@ -127,26 +151,36 @@ button {
 
 
 /* Timeline Items */
+/* index.html is read-only: nothing there opens an editor, so nothing there
+   should offer a hand cursor or a grab handle. admin.html sets .admin-mode. */
 .timeline-item {
     position: absolute;
-    width: 800px;
+    cursor: default;
+    width: var(--item-width);
     padding: 5px;
     padding-left: 10px;
     padding-bottom: 0px;
+    overflow: hidden;
     transition: transform 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.27), box-shadow 0.3s ease;
-    cursor: pointer;
     user-select: none;
     border-left: 2px solid var(--accent-color);
     background: rgba(255, 255, 255, 0.05);
 }
 
+/* Cards sit shoulder to shoulder once they are packed into rows, so a resting
+   card is one clipped line and only the hovered one opens up. */
 .timeline-item:hover {
-    transform: scale(1.05) translateY(-5px);
+    transform: translateY(-5px);
     box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
     border-color: var(--accent-color);
     z-index: 10;
     color: black;
     background: white;
+    overflow: visible;
+    width: auto;
+    min-width: var(--item-width);
+    max-width: 560px;
+    padding-bottom: 6px;
 }
 
 .timeline-item:hover .item-desc {
@@ -162,7 +196,13 @@ button {
 .item-title {
     font-weight: 600;
     margin-bottom: 8px;
-    /* Allow wrapping */
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.timeline-item:hover .item-title {
+    white-space: normal;
 }
 
 .modified-item .item-title,
@@ -246,17 +286,24 @@ button {
 
 .sheet4-label {
     position: absolute;
+    touch-action: none;
 
     font-size: 0.75rem;
     pointer-events: auto;
-    /* Enable interaction */
-    cursor: grab;
-    /* Show grab cursor */
+    cursor: default;
     white-space: nowrap;
     z-index: 6;
     padding: 5px;
     background: rgba(0, 0, 0, 0.4);
     border-radius: 4px;
+}
+
+.admin-mode .timeline-item {
+    cursor: pointer;
+}
+
+.admin-mode .sheet4-label {
+    cursor: grab;
 }
 
 .sheet4-label.dragging {
@@ -267,7 +314,8 @@ button {
 
 .s2-country {
     font-weight: 700;
-    color: #555555;
+    /* #555 on the near-black ground fell well under any readable contrast. */
+    color: var(--muted-color);
     text-shadow: 0 0 5px rgba(0, 0, 0, 0.8);
 }
 
@@ -459,4 +507,47 @@ button {
 
 .about-content .credits p {
     margin-bottom: 8px;
+}
+/* Login gate (admin.html). Opaque rather than translucent: there is nothing
+   behind it worth showing until the password has been accepted. */
+#login-overlay {
+    position: fixed;
+    inset: 0;
+    background: var(--bg-color);
+    z-index: 400;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+}
+
+.login-modal {
+    max-width: 360px;
+    border: 1px solid var(--glass-border);
+}
+
+.login-modal h2 {
+    font-size: 1.25rem;
+    margin-bottom: 8px;
+}
+
+.login-note {
+    color: #999;
+    font-size: 0.85rem;
+    margin-bottom: 24px;
+}
+
+.login-error {
+    color: #ff8080;
+    font-size: 0.85rem;
+    margin-top: 12px;
+}
+
+.modal-actions {
+    align-items: center;
+}
+
+#login-submit:disabled {
+    opacity: 0.5;
+    cursor: progress;
 }

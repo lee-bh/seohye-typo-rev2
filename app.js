@@ -1,15 +1,16 @@
-const API_URL = 'https://script.google.com/macros/s/AKfycbwsd2UULk5uY0yrrXPMvaom_pi8HV9QeFLbUrHdsmMsGkesZkL8NoIqNRNiqg2VOMs2/exec';
+const API_URL = 'https://script.google.com/macros/s/AKfycbzPIExsHzV_XBuAS9YaOJ7Wxpir9-DE_ZZQsNsp6YmfkIvpe5VZ7tpX_bMrNXY-OA9P/exec';
 
 // State
 let state = {
     items: [], // Sheet3 data
     sheet4Items: [], // Sheet4 data
-    horizontalScale: 4, // Horizontal zoom scale
+    horizontalScale: 4, // Horizontal zoom scale (DEFAULT_SCALE)
     offsetX: 0,
     offsetY: 0,
     isDragging: false,
     isItemDragging: false,
-    draggedDist: 0, // Track drag distance
+    draggedDist: 0, // Pointer travel since the current drag started
+    panDist: 0, // Pointer travel since the current pan started
     draggingEl: null,
     draggingItem: null,
     startY: 0,
@@ -29,19 +30,73 @@ function getSignature(item) {
 const app = document.getElementById('app');
 const timelineContainer = document.getElementById('timeline-container');
 const timelineContent = document.getElementById('timeline-content');
-const modalOverlay = document.getElementById('modal-overlay');
-const itemForm = document.getElementById('item-form');
 const loadingIndicator = document.getElementById('loading-indicator');
 
+// Editing lives in admin.js, which fills these in. index.html loads this file
+// alone and stays read-only: no modals, no writes, nothing to authorise.
+const editHooks = {
+    onDataLoaded: null, // () => void, after every successful load
+    onItemClick: null, // (item) => void, a sheet3 card was clicked
+    onPeriodClick: null, // (item) => void, a sheet4 label was clicked
+    onPeriodMove: null // (item, newLayer) => Promise, a label was dragged
+};
+
+function isEditable() {
+    return editHooks.onItemClick !== null;
+}
+
 // Constants
-const PIXELS_PER_YEAR = 20; // Base width for one year
-const Y_SPREAD = 400; // Vertical spread range
+const LAYER_COUNT = 31; // sheet4 stacks periods across this many layers
+const LAYER_HEIGHT = 40; // vertical distance between two layers
+const LAYER_TOP_MARGIN = 80; // top of the content to layer 1's label
+const LABEL_LINE_GAP = 20; // a label sits this far above its period line
+const CLICK_SLOP = 5; // pointer travel still counted as a click, in px
+const ITEM_WIDTH = 320; // sheet3 card width, mirrored into CSS as --item-width
+const ITEM_GAP = 8; // minimum horizontal space between two cards in a row
+const ITEM_ROW_HEIGHT = 40; // vertical distance between two packed rows
+const MIN_SCALE = 0.5;
+const MAX_SCALE = 10;
+const DEFAULT_SCALE = 4;
+
+// Layer geometry lives in these two functions alone: the render pass, the drag
+// preview and the drop calculation all used to carry their own copy of the
+// margin, and a 20px disagreement between them made every label jump the moment
+// it was picked up.
+function layerTop(layer) {
+    return (layer - 1) * LAYER_HEIGHT + LAYER_TOP_MARGIN;
+}
+
+function layerFromTop(top) {
+    return Math.round((top - LAYER_TOP_MARGIN) / LAYER_HEIGHT) + 1;
+}
+
+// Where the sheet3 cards begin, just below the last period layer. Derived from
+// the layer geometry rather than the hardcoded 1410 it used to be, which drifted
+// out of agreement with the layers it was meant to clear.
+function sheet3Top() {
+    return layerTop(LAYER_COUNT) + LABEL_LINE_GAP + 80;
+}
+
+// Spreadsheet text goes into innerHTML; a stray < in a title would otherwise
+// swallow the rest of the card.
+function escapeHtml(value) {
+    return textValue(value).replace(/[&<>"']/g, ch => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+    })[ch]);
+}
+
+// One year in pixels at the current zoom. Derived in three places before, which
+// is one divergence away from items and grid lines disagreeing on where a year
+// sits.
+function getPixelsPerYear() {
+    const totalTime = state.maxYear - state.minYear;
+    if (totalTime <= 0) return 1;
+    return (window.innerWidth / totalTime) * state.horizontalScale;
+}
 
 // Initialize
 async function init() {
-    console.log('Current Scale:', PIXELS_PER_YEAR);
     setupInteractions();
-    setupForm();
     await loadData();
     centerView();
 }
@@ -59,12 +114,13 @@ async function loadData() {
         const json2 = await res2.json();
 
         if (json1.status === 'success' && json2.status === 'success') {
-            state.items = parseRows(json1.data.headers, json1.data.rows);
-            state.sheet4Items = parseRows(json2.data.headers, json2.data.rows);
+            state.items = parseRows(json1.data.headers, json1.data.rows, json1.data.rowNumbers);
+            state.sheet4Items = parseRows(json2.data.headers, json2.data.rows, json2.data.rowNumbers);
 
             console.log('Sheet3 items:', state.items);
             console.log('Sheet4 items:', state.sheet4Items);
 
+            if (editHooks.onDataLoaded) editHooks.onDataLoaded();
             calculateBounds();
             renderTimeline();
         } else {
@@ -80,15 +136,27 @@ async function loadData() {
     }
 }
 
-function parseRows(headers, rows) {
+function parseRows(headers, rows, rowNumbers) {
     return rows.map((row, index) => {
         const item = {};
         headers.forEach((header, i) => {
             item[header.toLowerCase()] = row[i];
         });
-        item._row = index + 2; // Sheet row index (1-based, header is 1)
+
+        // The backend reports the real sheet row for each record. Older
+        // deployments do not, so fall back to guessing from the array index --
+        // which is only correct while the sheet holds no blank rows.
+        const reported = rowNumbers && rowNumbers[index];
+        item._row = parseInt(reported, 10) || index + 2;
         return item;
     });
+}
+
+// Missing spreadsheet cells arrive as undefined; assigning that to an input
+// would put the literal string "undefined" into the field, and saving would
+// write it back to the sheet.
+function textValue(value) {
+    return value === undefined || value === null ? '' : String(value);
 }
 
 function useMockData() {
@@ -107,6 +175,7 @@ function useMockData() {
         { country: '일본', theme: '막부', begin: 1603, end: 1868, layer: 5, title: '에도 막부' },
         { country: '테스트', theme: '테스트', begin: 1950, end: null, layer: 6, title: '종료년도 없음 테스트' }
     ];
+    if (editHooks.onDataLoaded) editHooks.onDataLoaded();
     calculateBounds();
     renderTimeline();
 }
@@ -152,11 +221,7 @@ function calculateBounds() {
 function renderTimeline() {
     timelineContent.innerHTML = '';
 
-    // Calculate dynamic pixelsPerYear based on viewport and horizontal scale
-    const totalTime = state.maxYear - state.minYear;
-    const screenWidth = window.innerWidth;
-    const basePixelsPerYear = screenWidth / totalTime;
-    const pixelsPerYear = basePixelsPerYear * state.horizontalScale;
+    const pixelsPerYear = getPixelsPerYear();
 
     // 1. Render Sheet4 (Top Section - 31 layers)
     renderSheet4(pixelsPerYear);
@@ -168,14 +233,11 @@ function renderTimeline() {
 }
 
 function renderSheet4(pixelsPerYear) {
-    const layerHeight = 40;
-    const topMargin = 80;
-
-    // Render 31 Horizontal Guide Lines
-    for (let i = 0; i < 31; i++) {
+    // Render one horizontal guide line per layer
+    for (let i = 1; i <= LAYER_COUNT; i++) {
         const guide = document.createElement('div');
         guide.className = 'layer-guide-line';
-        guide.style.top = `${i * layerHeight + topMargin + 20}px`;
+        guide.style.top = `${layerTop(i) + LABEL_LINE_GAP}px`;
         timelineContent.appendChild(guide);
     }
 
@@ -194,14 +256,14 @@ function renderSheet4(pixelsPerYear) {
 
         const xStart = (begin - state.minYear) * pixelsPerYear;
         const xEnd = (end - state.minYear) * pixelsPerYear;
-        const y = (layer - 1) * layerHeight + topMargin;
+        const y = layerTop(layer);
 
         // Line
         const line = document.createElement('div');
         line.className = 'sheet4-line';
         line.id = `line-${item._row}`; // Add ID to update line position during drag
         line.style.left = `${xStart}px`;
-        line.style.top = `${y + 20}px`;
+        line.style.top = `${y + LABEL_LINE_GAP}px`;
         line.style.width = `${xEnd - xStart}px`;
         timelineContent.appendChild(line);
 
@@ -211,12 +273,12 @@ function renderSheet4(pixelsPerYear) {
         label.style.left = `${xStart}px`;
         label.style.top = `${y}px`;
         label.innerHTML = `
-            <span class="s2-country">${item.country}</span>
-            <span class="s2-title">${item.title}</span>
+            <span class="s2-country">${escapeHtml(item.country)}</span>
+            <span class="s2-title">${escapeHtml(item.title)}</span>
         `;
 
         // DRAG AND DROP & CLICK
-        label.addEventListener('mousedown', (e) => {
+        if (isEditable()) label.addEventListener('pointerdown', (e) => {
             e.stopPropagation();
             state.isItemDragging = true;
             state.draggedDist = 0; // Reset distance
@@ -232,12 +294,18 @@ function renderSheet4(pixelsPerYear) {
 }
 
 function renderSheet3(pixelsPerYear) {
-    const sheet3TopOffset = 1410; // Increased for 31 layers (31 * 40 + 60 + margin)
+    const topOffset = sheet3Top();
 
     // Sort items by year
     const sortedItems = [...state.items].sort((a, b) => (parseInt(a.yr) || 0) - (parseInt(b.yr) || 0));
 
-    sortedItems.forEach((item, index) => {
+    // Pack the sorted cards into rows: each one drops into the first row whose
+    // previous card has already ended before this card starts. Stacking by array
+    // index instead gave every card a row of its own, a diagonal staircase
+    // 45px * n tall in which nothing about a period's density was readable.
+    const rowEnds = [];
+
+    sortedItems.forEach(item => {
         const el = document.createElement('div');
         el.className = 'timeline-item';
 
@@ -249,20 +317,27 @@ function renderSheet3(pixelsPerYear) {
         if (isNaN(year)) year = state.minYear;
 
         const x = (year - state.minYear) * pixelsPerYear;
-        const y = sheet3TopOffset + (index * 45); // Simple vertical stacking
+
+        let row = rowEnds.findIndex(end => end <= x);
+        if (row === -1) row = rowEnds.length;
+        rowEnds[row] = x + ITEM_WIDTH + ITEM_GAP;
+
+        const y = topOffset + row * ITEM_ROW_HEIGHT;
 
         el.style.left = `${x}px`;
         el.style.top = `${y}px`;
 
-        const info = item.info || '';
         el.innerHTML = `
-            <div class="item-title">${item.yr || ''} ${item.item || 'Unknown'} <span class="tag">${item.nation}</span> <span class="tag">${item.category}</span></div>
-            <div class="item-desc">${info}</div>
+            <div class="item-title">${escapeHtml(item.yr)} ${escapeHtml(item.item) || 'Unknown'} <span class="tag">${escapeHtml(item.nation)}</span> <span class="tag">${escapeHtml(item.category)}</span></div>
+            <div class="item-desc">${escapeHtml(item.info)}</div>
         `;
 
-        el.addEventListener('click', (e) => {
+        if (isEditable()) el.addEventListener('click', (e) => {
             e.stopPropagation();
-            openEditModal(item);
+            // Dragging the canvas by an item still pans it, and the click that
+            // follows would otherwise open this record's editor on release.
+            if (state.panDist > CLICK_SLOP) return;
+            editHooks.onItemClick(item);
         });
 
         timelineContent.appendChild(el);
@@ -281,11 +356,7 @@ function renderGrid() {
     const endYear = Math.ceil(maxGridYear / 10) * 10;
     const step = 10;
 
-    // We need to calculate X based on the same formula as items (including horizontalScale)
-    const totalTime = state.maxYear - state.minYear;
-    const screenWidth = window.innerWidth;
-    const basePixelsPerYear = screenWidth / totalTime;
-    const pixelsPerYear = basePixelsPerYear * state.horizontalScale;
+    const pixelsPerYear = getPixelsPerYear();
 
     for (let y = startYear; y <= endYear; y += step) {
         const line = document.createElement('div');
@@ -306,29 +377,57 @@ function renderGrid() {
     }
 }
 
+// Every pointer currently down on the timeline, so a second finger can be told
+// apart from the first. Pointer events cover mouse, touch and pen alike; the
+// mouse-only handlers this replaces left the timeline completely inert on
+// phones and tablets.
+const activePointers = new Map();
+let pinch = null;
+
 // Interactions
 function setupInteractions() {
     // Drag Interaction
-    timelineContainer.addEventListener('mousedown', (e) => {
+    timelineContainer.addEventListener('pointerdown', (e) => {
+        activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+        if (activePointers.size === 2) {
+            beginPinch();
+            state.isDragging = false;
+            return;
+        }
+        if (activePointers.size > 2) return;
+
         state.isDragging = true;
+        state.panDist = 0;
         state.lastMouseX = e.clientX;
         state.lastMouseY = e.clientY;
         timelineContainer.style.cursor = 'grabbing';
     });
 
-    window.addEventListener('mousemove', (e) => {
-        if (state.isItemDragging) {
-            const deltaYRaw = e.clientY - state.startY;
-            state.draggedDist += Math.abs(deltaYRaw);
+    window.addEventListener('pointermove', (e) => {
+        if (activePointers.has(e.pointerId)) {
+            activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+        }
 
-            const deltaY = deltaYRaw;
-            const currentY = ((state.draggingItem.layer - 1) * 40 + 60) + deltaY;
+        if (pinch && activePointers.size >= 2) {
+            applyPinch();
+            return;
+        }
+
+        if (state.isItemDragging) {
+            // Travel from where the drag started, not a running sum of that
+            // distance -- accumulating it made a one-pixel tremor read as a
+            // deliberate drag within a few mousemove events.
+            const deltaY = e.clientY - state.startY;
+            state.draggedDist = Math.abs(deltaY);
+
+            const currentY = layerTop(state.startLayer) + deltaY;
 
             state.draggingEl.style.top = `${currentY}px`;
 
             // Sync line position
             const line = document.getElementById(`line-${state.draggingItem._row}`);
-            if (line) line.style.top = `${currentY + 20}px`;
+            if (line) line.style.top = `${currentY + LABEL_LINE_GAP}px`;
 
             return;
         }
@@ -338,6 +437,7 @@ function setupInteractions() {
         const deltaX = e.clientX - state.lastMouseX;
         const deltaY = e.clientY - state.lastMouseY;
 
+        state.panDist += Math.abs(deltaX) + Math.abs(deltaY);
         state.offsetX += deltaX;
         state.offsetY += deltaY;
 
@@ -347,7 +447,25 @@ function setupInteractions() {
         updateTransform();
     });
 
-    window.addEventListener('mouseup', async (e) => {
+    window.addEventListener('pointerup', endPointer);
+    window.addEventListener('pointercancel', endPointer);
+
+    async function endPointer(e) {
+        activePointers.delete(e.pointerId);
+
+        if (activePointers.size < 2) pinch = null;
+
+        // Lifting one finger of a pinch hands the pan back to the other one;
+        // without re-anchoring, the next move would jump by their separation.
+        if (activePointers.size === 1) {
+            const [remaining] = activePointers.values();
+            state.lastMouseX = remaining.x;
+            state.lastMouseY = remaining.y;
+            state.panDist = 0;
+            state.isDragging = true;
+            return;
+        }
+
         if (state.isItemDragging) {
             state.isItemDragging = false;
             const label = state.draggingEl;
@@ -355,20 +473,16 @@ function setupInteractions() {
             label.classList.remove('dragging');
 
             // Calculate final layer
-            const layerHeight = 40;
-            const topMargin = 60;
             const finalY = parseFloat(label.style.top);
-            let newLayer = Math.round((finalY - topMargin) / layerHeight) + 1;
-
-            // Clamp 1-31
-            newLayer = Math.max(1, Math.min(31, newLayer));
+            let newLayer = layerFromTop(finalY);
+            newLayer = Math.max(1, Math.min(LAYER_COUNT, newLayer));
 
             if (newLayer !== parseInt(item.layer)) {
                 item.layer = newLayer;
-                await updateItemLayer(item._row, newLayer);
-            } else if (state.draggedDist < 5) {
+                await editHooks.onPeriodMove(item, newLayer);
+            } else if (state.draggedDist < CLICK_SLOP) {
                 // It was a click, not a significant drag
-                openSheet4Modal(item);
+                editHooks.onPeriodClick(item);
             } else {
                 // Snap back if no change but was a drag
                 renderTimeline();
@@ -381,75 +495,109 @@ function setupInteractions() {
 
         state.isDragging = false;
         timelineContainer.style.cursor = 'grab';
-    });
+    }
 
     // Buttons
-    document.getElementById('zoom-in').style.display = 'none';
-    document.getElementById('zoom-out').style.display = 'none';
     document.getElementById('reset-view').onclick = () => {
-        state.offsetX = 0;
-        state.offsetY = 0;
-        state.horizontalScale = 4;
+        state.horizontalScale = DEFAULT_SCALE;
         renderTimeline();
-        updateTransform();
-    };
-    document.getElementById('reset-view').style.display = 'flex'; // Show reset button
-
-    document.getElementById('add-sheet4-btn').onclick = () => {
-        openSheet4Modal(null);
+        centerView();
     };
 
     document.getElementById('about-btn').onclick = () => {
         document.getElementById('modal-overlay-about').classList.remove('hidden');
     };
 
-    document.getElementById('add-item-btn').onclick = () => {
-        openEditModal(null);
+    document.getElementById('close-modal-about').onclick = () => {
+        document.getElementById('modal-overlay-about').classList.add('hidden');
     };
+
+    const aboutOverlay = document.getElementById('modal-overlay-about');
+    aboutOverlay.addEventListener('click', (e) => {
+        if (e.target === aboutOverlay) aboutOverlay.classList.add('hidden');
+    });
 
     // Wheel zoom (horizontal only)
     timelineContainer.addEventListener('wheel', (e) => {
         e.preventDefault();
 
         const zoomSpeed = 0.001;
-        const delta = -e.deltaY;
-        const zoomFactor = 1 + delta * zoomSpeed;
-
-        // Get mouse position relative to container
+        const zoomFactor = 1 + (-e.deltaY * zoomSpeed);
         const rect = timelineContainer.getBoundingClientRect();
-        const mouseX = e.clientX - rect.left;
 
-        // Calculate the timeline position under the mouse before zoom
-        const totalTime = state.maxYear - state.minYear;
-        const screenWidth = window.innerWidth;
-        const basePixelsPerYear = screenWidth / totalTime;
-        const currentPixelsPerYear = basePixelsPerYear * state.horizontalScale;
-
-        // Position in timeline coordinates (before offset)
-        const timelineX = mouseX - state.offsetX;
-
-        // Update horizontal scale
-        const newHorizontalScale = Math.max(0.5, Math.min(10, state.horizontalScale * zoomFactor));
-
-        if (newHorizontalScale !== state.horizontalScale) {
-            // Calculate new pixels per year
-            const newPixelsPerYear = basePixelsPerYear * newHorizontalScale;
-
-            // Adjust offset to keep the point under mouse stationary
-            const scaleDiff = newPixelsPerYear / currentPixelsPerYear;
-            const newTimelineX = timelineX * scaleDiff;
-            state.offsetX = mouseX - newTimelineX;
-
-            state.horizontalScale = newHorizontalScale;
-            renderTimeline();
-            updateTransform();
-        }
+        zoomTo(state.horizontalScale * zoomFactor, e.clientX - rect.left);
     }, { passive: false });
 
     // Re-render on resize
-    window.addEventListener('resize', () => {
+    window.addEventListener('resize', scheduleRender);
+}
+
+function beginPinch() {
+    const [a, b] = [...activePointers.values()];
+    const rect = timelineContainer.getBoundingClientRect();
+
+    pinch = {
+        startDist: Math.hypot(a.x - b.x, a.y - b.y) || 1,
+        startScale: state.horizontalScale,
+        lastMid: { x: (a.x + b.x) / 2 - rect.left, y: (a.y + b.y) / 2 - rect.top }
+    };
+}
+
+function applyPinch() {
+    const [a, b] = [...activePointers.values()];
+    const rect = timelineContainer.getBoundingClientRect();
+    const midX = (a.x + b.x) / 2 - rect.left;
+    const midY = (a.y + b.y) / 2 - rect.top;
+
+    // Two fingers moving together pan; two fingers spreading zoom. Handling the
+    // pan first means a pinch that barely changes separation still drags.
+    state.offsetX += midX - pinch.lastMid.x;
+    state.offsetY += midY - pinch.lastMid.y;
+    pinch.lastMid = { x: midX, y: midY };
+
+    const dist = Math.hypot(a.x - b.x, a.y - b.y) || 1;
+    zoomTo(pinch.startScale * (dist / pinch.startDist), midX);
+    updateTransform();
+}
+
+// Zoom horizontally around a fixed point, given in container coordinates, so
+// the year under the cursor or under the pinch centre stays put.
+function zoomTo(scale, anchorX) {
+    const next = Math.max(MIN_SCALE, Math.min(MAX_SCALE, scale));
+    if (next === state.horizontalScale) return;
+
+    const before = getPixelsPerYear();
+    const timelineX = anchorX - state.offsetX;
+
+    state.horizontalScale = next;
+    state.offsetX = anchorX - timelineX * (getPixelsPerYear() / before);
+
+    scheduleRender();
+}
+
+// A zoom gesture fires far more often than the screen refreshes, and each
+// render rebuilds every node in the timeline. Coalesce them into one per frame.
+let renderHandle = null;
+
+function scheduleRender() {
+    if (renderHandle !== null) return;
+
+    renderHandle = requestAnimationFrame(() => {
+        renderHandle = null;
         renderTimeline();
+        updateTransform();
     });
+}
+
+// Called once after the first load and by the reset button: puts the middle of
+// the data range in the middle of the viewport. It was referenced at the end of
+// init() but never defined, so every startup ended in a TypeError and the view
+// opened wherever the origin happened to fall.
+function centerView() {
+    const midYear = (state.minYear + state.maxYear) / 2;
+    state.offsetX = window.innerWidth / 2 - (midYear - state.minYear) * getPixelsPerYear();
+    state.offsetY = 0;
+    updateTransform();
 }
 
 function updateTransform() {
@@ -462,207 +610,13 @@ function updateTransform() {
     }
 }
 
-// Modal & Form
-function openEditModal(item) {
-    const modalTitle = document.getElementById('modal-title');
-    const deleteBtn = document.getElementById('delete-btn');
-
-    if (item) {
-        modalTitle.textContent = 'Edit Item';
-        document.getElementById('edit-row').value = item._row;
-        document.getElementById('edit-nation').value = item.nation;
-        document.getElementById('edit-category').value = item.category;
-        document.getElementById('edit-yr').value = item.yr;
-        document.getElementById('edit-item').value = item.item;
-        document.getElementById('edit-info').value = item.info;
-        document.getElementById('edit-link').value = item.link;
-        document.getElementById('edit-cite').value = item.cite;
-        deleteBtn.classList.remove('hidden');
-
-        deleteBtn.onclick = () => deleteItem(item._row);
-    } else {
-        modalTitle.textContent = 'Add New Item';
-        itemForm.reset();
-        document.getElementById('edit-row').value = '';
-        deleteBtn.classList.add('hidden');
-    }
-
-    modalOverlay.classList.remove('hidden');
-}
-
-function openSheet4Modal(item) {
-    const modalOverlayS4 = document.getElementById('modal-overlay-s4');
-    const modalTitleS4 = document.getElementById('modal-title-s4');
-    const deleteBtnS4 = document.getElementById('delete-btn-s4');
-    const formS4 = document.getElementById('item-form-s4');
-
-    if (item) {
-        modalTitleS4.textContent = '시대상 수정';
-        document.getElementById('edit-row-s4').value = item._row;
-        document.getElementById('edit-country-s4').value = item.country;
-        document.getElementById('edit-theme-s4').value = item.theme;
-        document.getElementById('edit-begin-s4').value = item.begin;
-        document.getElementById('edit-end-s4').value = item.end;
-        document.getElementById('edit-layer-s4').value = item.layer;
-        document.getElementById('edit-title-s4').value = item.title;
-        deleteBtnS4.classList.remove('hidden');
-
-        deleteBtnS4.onclick = () => deleteItem(item._row, 'sheet4');
-    } else {
-        modalTitleS4.textContent = '시대상 추가';
-        formS4.reset();
-        document.getElementById('edit-row-s4').value = '';
-        deleteBtnS4.classList.add('hidden');
-    }
-
-    modalOverlayS4.classList.remove('hidden');
-}
-
-function setupForm() {
-    // Sheet1 Close
-    document.getElementById('close-modal').onclick = () => {
-        modalOverlay.classList.add('hidden');
-    };
-
-    // Sheet4 Close
-    document.getElementById('close-modal-s4').onclick = () => {
-        document.getElementById('modal-overlay-s4').classList.add('hidden');
-    };
-
-    // About Close
-    document.getElementById('close-modal-about').onclick = () => {
-        document.getElementById('modal-overlay-about').classList.add('hidden');
-    };
-
-    // Overlay clicks
-    window.addEventListener('click', (e) => {
-        if (e.target === modalOverlay) modalOverlay.classList.add('hidden');
-        const s4Overlay = document.getElementById('modal-overlay-s4');
-        if (e.target === s4Overlay) s4Overlay.classList.add('hidden');
-        const aboutOverlay = document.getElementById('modal-overlay-about');
-        if (e.target === aboutOverlay) aboutOverlay.classList.add('hidden');
-    });
-
-    // Sheet1 Submit
-    itemForm.onsubmit = async (e) => {
-        e.preventDefault();
-        const formData = new FormData(itemForm);
-        const data = Object.fromEntries(formData.entries());
-        const action = data._row ? 'update' : 'create';
-        await sendData(action, data);
-    };
-
-    // Sheet4 Submit
-    const formS4 = document.getElementById('item-form-s4');
-    formS4.onsubmit = async (e) => {
-        e.preventDefault();
-        const formData = new FormData(formS4);
-        const data = Object.fromEntries(formData.entries());
-        const action = data._row ? 'update' : 'create';
-        await sendData(action, data);
-    };
-}
-
-async function updateItemLayer(row, newLayer) {
-    showLoading(true);
-    try {
-        const params = new URLSearchParams();
-        params.append('action', 'update');
-        params.append('sheet', 'sheet4');
-        params.append('_row', row);
-        params.append('layer', newLayer);
-
-        const response = await fetch(`${API_URL}`, {
-            method: 'POST',
-            body: params
-        });
-
-        const result = await response.json();
-        if (result.status === 'success') {
-            alert('변경완료');
-            await loadData(); // Reload for accuracy
-        } else {
-            alert('Error: ' + result.message);
-            renderTimeline(); // Reset view
-        }
-    } catch (error) {
-        console.error('Update error:', error);
-        alert('Failed to update layer.');
-        renderTimeline();
-    } finally {
-        showLoading(false);
-    }
-}
-
-async function sendData(action, data) {
-    showLoading(true);
-    modalOverlay.classList.add('hidden');
-
-    try {
-        // Convert data to URLSearchParams for POST body
-        const params = new URLSearchParams();
-        for (const key in data) {
-            params.append(key, data[key]);
-        }
-
-        const response = await fetch(`${API_URL}?action=${action}`, {
-            method: 'POST',
-            body: params
-        });
-
-        const result = await response.json();
-        if (result.status === 'success') {
-            // Add signature to modified set
-            // data contains the fields we need
-            state.modifiedSignatures.add(getSignature(data));
-
-            await loadData(); // Reload to see changes
-        } else {
-            alert('Error: ' + result.message);
-        }
-    } catch (error) {
-        console.error('Save error:', error);
-        alert('Failed to save. Check console.');
-    } finally {
-        showLoading(false);
-    }
-}
-
-async function deleteItem(row, sheetName = 'sheet3') {
-    if (!confirm('Are you sure you want to delete this item?')) return;
-
-    showLoading(true);
-    modalOverlay.classList.add('hidden');
-    document.getElementById('modal-overlay-s4').classList.add('hidden');
-
-    try {
-        const params = new URLSearchParams();
-        params.append('_row', row);
-        params.append('sheet', sheetName);
-
-        const response = await fetch(`${API_URL}?action=delete`, {
-            method: 'POST',
-            body: params
-        });
-
-        const result = await response.json();
-        if (result.status === 'success') {
-            await loadData();
-        } else {
-            alert('Error: ' + result.message);
-        }
-    } catch (error) {
-        console.error('Delete error:', error);
-        alert('Failed to delete.');
-    } finally {
-        showLoading(false);
-    }
-}
-
 function showLoading(show) {
     if (show) loadingIndicator.classList.remove('hidden');
     else loadingIndicator.classList.add('hidden');
 }
 
-// Start
-init();
+// Start. admin.html holds this back until the password has been accepted;
+// index.html has nothing to unlock and starts straight away.
+if (!document.body.classList.contains('admin-mode')) {
+    init();
+}
