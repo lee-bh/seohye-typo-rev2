@@ -9,7 +9,8 @@ let state = {
     offsetY: 0,
     isDragging: false,
     isItemDragging: false,
-    draggedDist: 0, // Track drag distance
+    draggedDist: 0, // Pointer travel since the current drag started
+    panDist: 0, // Pointer travel since the current pan started
     draggingEl: null,
     draggingItem: null,
     startY: 0,
@@ -34,12 +35,35 @@ const itemForm = document.getElementById('item-form');
 const loadingIndicator = document.getElementById('loading-indicator');
 
 // Constants
-const PIXELS_PER_YEAR = 20; // Base width for one year
-const Y_SPREAD = 400; // Vertical spread range
+const LAYER_COUNT = 31; // sheet4 stacks periods across this many layers
+const LAYER_HEIGHT = 40; // vertical distance between two layers
+const LAYER_TOP_MARGIN = 80; // top of the content to layer 1's label
+const LABEL_LINE_GAP = 20; // a label sits this far above its period line
+const CLICK_SLOP = 5; // pointer travel still counted as a click, in px
+
+// Layer geometry lives in these two functions alone: the render pass, the drag
+// preview and the drop calculation all used to carry their own copy of the
+// margin, and a 20px disagreement between them made every label jump the moment
+// it was picked up.
+function layerTop(layer) {
+    return (layer - 1) * LAYER_HEIGHT + LAYER_TOP_MARGIN;
+}
+
+function layerFromTop(top) {
+    return Math.round((top - LAYER_TOP_MARGIN) / LAYER_HEIGHT) + 1;
+}
+
+// One year in pixels at the current zoom. Derived in three places before, which
+// is one divergence away from items and grid lines disagreeing on where a year
+// sits.
+function getPixelsPerYear() {
+    const totalTime = state.maxYear - state.minYear;
+    if (totalTime <= 0) return 1;
+    return (window.innerWidth / totalTime) * state.horizontalScale;
+}
 
 // Initialize
 async function init() {
-    console.log('Current Scale:', PIXELS_PER_YEAR);
     setupInteractions();
     setupForm();
     await loadData();
@@ -213,11 +237,7 @@ function calculateBounds() {
 function renderTimeline() {
     timelineContent.innerHTML = '';
 
-    // Calculate dynamic pixelsPerYear based on viewport and horizontal scale
-    const totalTime = state.maxYear - state.minYear;
-    const screenWidth = window.innerWidth;
-    const basePixelsPerYear = screenWidth / totalTime;
-    const pixelsPerYear = basePixelsPerYear * state.horizontalScale;
+    const pixelsPerYear = getPixelsPerYear();
 
     // 1. Render Sheet4 (Top Section - 31 layers)
     renderSheet4(pixelsPerYear);
@@ -229,14 +249,11 @@ function renderTimeline() {
 }
 
 function renderSheet4(pixelsPerYear) {
-    const layerHeight = 40;
-    const topMargin = 80;
-
-    // Render 31 Horizontal Guide Lines
-    for (let i = 0; i < 31; i++) {
+    // Render one horizontal guide line per layer
+    for (let i = 1; i <= LAYER_COUNT; i++) {
         const guide = document.createElement('div');
         guide.className = 'layer-guide-line';
-        guide.style.top = `${i * layerHeight + topMargin + 20}px`;
+        guide.style.top = `${layerTop(i) + LABEL_LINE_GAP}px`;
         timelineContent.appendChild(guide);
     }
 
@@ -255,14 +272,14 @@ function renderSheet4(pixelsPerYear) {
 
         const xStart = (begin - state.minYear) * pixelsPerYear;
         const xEnd = (end - state.minYear) * pixelsPerYear;
-        const y = (layer - 1) * layerHeight + topMargin;
+        const y = layerTop(layer);
 
         // Line
         const line = document.createElement('div');
         line.className = 'sheet4-line';
         line.id = `line-${item._row}`; // Add ID to update line position during drag
         line.style.left = `${xStart}px`;
-        line.style.top = `${y + 20}px`;
+        line.style.top = `${y + LABEL_LINE_GAP}px`;
         line.style.width = `${xEnd - xStart}px`;
         timelineContent.appendChild(line);
 
@@ -323,6 +340,9 @@ function renderSheet3(pixelsPerYear) {
 
         el.addEventListener('click', (e) => {
             e.stopPropagation();
+            // Dragging the canvas by an item still pans it, and the click that
+            // follows would otherwise open this record's editor on release.
+            if (state.panDist > CLICK_SLOP) return;
             openEditModal(item);
         });
 
@@ -342,11 +362,7 @@ function renderGrid() {
     const endYear = Math.ceil(maxGridYear / 10) * 10;
     const step = 10;
 
-    // We need to calculate X based on the same formula as items (including horizontalScale)
-    const totalTime = state.maxYear - state.minYear;
-    const screenWidth = window.innerWidth;
-    const basePixelsPerYear = screenWidth / totalTime;
-    const pixelsPerYear = basePixelsPerYear * state.horizontalScale;
+    const pixelsPerYear = getPixelsPerYear();
 
     for (let y = startYear; y <= endYear; y += step) {
         const line = document.createElement('div');
@@ -372,6 +388,7 @@ function setupInteractions() {
     // Drag Interaction
     timelineContainer.addEventListener('mousedown', (e) => {
         state.isDragging = true;
+        state.panDist = 0;
         state.lastMouseX = e.clientX;
         state.lastMouseY = e.clientY;
         timelineContainer.style.cursor = 'grabbing';
@@ -379,17 +396,19 @@ function setupInteractions() {
 
     window.addEventListener('mousemove', (e) => {
         if (state.isItemDragging) {
-            const deltaYRaw = e.clientY - state.startY;
-            state.draggedDist += Math.abs(deltaYRaw);
+            // Travel from where the drag started, not a running sum of that
+            // distance -- accumulating it made a one-pixel tremor read as a
+            // deliberate drag within a few mousemove events.
+            const deltaY = e.clientY - state.startY;
+            state.draggedDist = Math.abs(deltaY);
 
-            const deltaY = deltaYRaw;
-            const currentY = ((state.draggingItem.layer - 1) * 40 + 60) + deltaY;
+            const currentY = layerTop(state.startLayer) + deltaY;
 
             state.draggingEl.style.top = `${currentY}px`;
 
             // Sync line position
             const line = document.getElementById(`line-${state.draggingItem._row}`);
-            if (line) line.style.top = `${currentY + 20}px`;
+            if (line) line.style.top = `${currentY + LABEL_LINE_GAP}px`;
 
             return;
         }
@@ -399,6 +418,7 @@ function setupInteractions() {
         const deltaX = e.clientX - state.lastMouseX;
         const deltaY = e.clientY - state.lastMouseY;
 
+        state.panDist += Math.abs(deltaX) + Math.abs(deltaY);
         state.offsetX += deltaX;
         state.offsetY += deltaY;
 
@@ -416,18 +436,14 @@ function setupInteractions() {
             label.classList.remove('dragging');
 
             // Calculate final layer
-            const layerHeight = 40;
-            const topMargin = 60;
             const finalY = parseFloat(label.style.top);
-            let newLayer = Math.round((finalY - topMargin) / layerHeight) + 1;
-
-            // Clamp 1-31
-            newLayer = Math.max(1, Math.min(31, newLayer));
+            let newLayer = layerFromTop(finalY);
+            newLayer = Math.max(1, Math.min(LAYER_COUNT, newLayer));
 
             if (newLayer !== parseInt(item.layer)) {
                 item.layer = newLayer;
                 await updateItemLayer(item._row, newLayer);
-            } else if (state.draggedDist < 5) {
+            } else if (state.draggedDist < CLICK_SLOP) {
                 // It was a click, not a significant drag
                 openSheet4Modal(item);
             } else {
@@ -448,11 +464,9 @@ function setupInteractions() {
     document.getElementById('zoom-in').style.display = 'none';
     document.getElementById('zoom-out').style.display = 'none';
     document.getElementById('reset-view').onclick = () => {
-        state.offsetX = 0;
-        state.offsetY = 0;
         state.horizontalScale = 4;
         renderTimeline();
-        updateTransform();
+        centerView();
     };
     document.getElementById('reset-view').style.display = 'flex'; // Show reset button
 
@@ -481,10 +495,7 @@ function setupInteractions() {
         const mouseX = e.clientX - rect.left;
 
         // Calculate the timeline position under the mouse before zoom
-        const totalTime = state.maxYear - state.minYear;
-        const screenWidth = window.innerWidth;
-        const basePixelsPerYear = screenWidth / totalTime;
-        const currentPixelsPerYear = basePixelsPerYear * state.horizontalScale;
+        const currentPixelsPerYear = getPixelsPerYear();
 
         // Position in timeline coordinates (before offset)
         const timelineX = mouseX - state.offsetX;
@@ -493,15 +504,12 @@ function setupInteractions() {
         const newHorizontalScale = Math.max(0.5, Math.min(10, state.horizontalScale * zoomFactor));
 
         if (newHorizontalScale !== state.horizontalScale) {
-            // Calculate new pixels per year
-            const newPixelsPerYear = basePixelsPerYear * newHorizontalScale;
+            state.horizontalScale = newHorizontalScale;
 
             // Adjust offset to keep the point under mouse stationary
-            const scaleDiff = newPixelsPerYear / currentPixelsPerYear;
-            const newTimelineX = timelineX * scaleDiff;
-            state.offsetX = mouseX - newTimelineX;
+            const scaleDiff = getPixelsPerYear() / currentPixelsPerYear;
+            state.offsetX = mouseX - timelineX * scaleDiff;
 
-            state.horizontalScale = newHorizontalScale;
             renderTimeline();
             updateTransform();
         }
@@ -511,6 +519,17 @@ function setupInteractions() {
     window.addEventListener('resize', () => {
         renderTimeline();
     });
+}
+
+// Called once after the first load and by the reset button: puts the middle of
+// the data range in the middle of the viewport. It was referenced at the end of
+// init() but never defined, so every startup ended in a TypeError and the view
+// opened wherever the origin happened to fall.
+function centerView() {
+    const midYear = (state.minYear + state.maxYear) / 2;
+    state.offsetX = window.innerWidth / 2 - (midYear - state.minYear) * getPixelsPerYear();
+    state.offsetY = 0;
+    updateTransform();
 }
 
 function updateTransform() {
@@ -577,6 +596,14 @@ function openSheet4Modal(item) {
     }
 
     modalOverlayS4.classList.remove('hidden');
+}
+
+// Saving used to hide the sheet3 overlay only, so a sheet4 period stayed on
+// screen behind its own modal after it had already been written.
+function closeModals() {
+    ['modal-overlay', 'modal-overlay-s4', 'modal-overlay-about'].forEach(id => {
+        document.getElementById(id).classList.add('hidden');
+    });
 }
 
 function setupForm() {
@@ -657,7 +684,7 @@ async function updateItemLayer(row, newLayer) {
 
 async function sendData(action, data) {
     showLoading(true);
-    modalOverlay.classList.add('hidden');
+    closeModals();
 
     try {
         // Convert data to URLSearchParams for POST body
@@ -693,8 +720,7 @@ async function deleteItem(row, sheetName = 'sheet3') {
     if (!confirm('Are you sure you want to delete this item?')) return;
 
     showLoading(true);
-    modalOverlay.classList.add('hidden');
-    document.getElementById('modal-overlay-s4').classList.add('hidden');
+    closeModals();
 
     try {
         const params = new URLSearchParams();
