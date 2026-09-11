@@ -70,10 +70,12 @@ This check has to live here rather than in the page, because the endpoint is
 reachable directly: a password checked in `admin.js` would stop nobody from
 POSTing to the `/exec` URL themselves.
 
-To set it, open `setAdminPassword()` in the editor, replace `CHANGE-ME` with the
-password, run the function once, then clear the literal and save again. The hash
+To set it, open `setAdminPassword()` in the editor and type the password between
+the quotes on the `const password = '';` line — that one line is the only thing
+to edit. Run the function once, then empty the quotes again and save. The hash
 lands in the script property `ADMIN_TOKEN_HASH`; the password is not stored
-anywhere. Until it is set, every write is refused with `code: not_configured`.
+anywhere. Run `checkAdminPassword()` to confirm it took; until it is set, every
+write is refused with `code: not_configured`.
 
 What this is and is not: it is one shared password giving a real server-side
 gate, and a wrong guess costs a round trip plus a half-second delay. It is not

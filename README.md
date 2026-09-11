@@ -39,7 +39,8 @@ every write. A check in the page's own JavaScript would be decorative, since the
 `/exec` endpoint can be posted to directly — so the endpoint is what enforces it,
 and reads stay public for `index.html`.
 
-Set the password with `setAdminPassword()` once in the Apps Script editor; see
+Set the password by typing it into `setAdminPassword()` and running that
+function once in the Apps Script editor; see
 [`apps-script/README.md`](apps-script/README.md#the-admin-password). Until it is
 set, every write is refused.
 

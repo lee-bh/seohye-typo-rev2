@@ -70,20 +70,33 @@ function doPost(e) {
 /* -------------------- Admin password -------------------- */
 
 /**
- * Run this ONCE from the Apps Script editor to set the admin password, then
- * clear the literal below and save again so it is not left in the source.
- * The password itself is never stored — only its hash.
+ * Sets the admin password. Type it between the quotes on the line below, run
+ * this function ONCE from the editor, then empty the quotes again and save so
+ * the password is not left in the source. It is never stored — only its hash.
+ *
+ * There is deliberately only one place to edit: an earlier version compared
+ * against a placeholder spelled out twice, and replacing both — the obvious
+ * reading of "change this" — made the guard match the new password and abort.
  */
 function setAdminPassword() {
-  const password = 'CHANGE-ME';
+  const password = '';
 
-  if (!password || password === 'CHANGE-ME') {
-    throw new Error("Edit the password in setAdminPassword() before running it.");
+  if (!password) {
+    throw new Error("Type the password between the quotes in setAdminPassword(), then run it again.");
   }
   PropertiesService.getScriptProperties()
     .setProperty(ADMIN_HASH_PROPERTY, sha256Hex(PASSWORD_PREFIX + password));
 
-  Logger.log("Admin password set. Now clear the literal from setAdminPassword().");
+  Logger.log("Admin password set. Now empty the quotes in setAdminPassword() and save.");
+}
+
+/** Run this to see whether a password is set. It does not reveal the password. */
+function checkAdminPassword() {
+  const hash = PropertiesService.getScriptProperties().getProperty(ADMIN_HASH_PROPERTY);
+
+  Logger.log(hash
+    ? "Admin password IS configured (hash ends in " + hash.slice(-6) + ")."
+    : "Admin password is NOT configured. Run setAdminPassword().");
 }
 
 /** Confirms a token without writing anything — admin.js's login screen. */
