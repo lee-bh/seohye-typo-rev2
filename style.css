@@ -2,6 +2,13 @@
     --bg-color: #0f0f13;
     --text-color: #e0e0e0;
     --accent-color: #ffffff;
+    --muted-color: #a9b0b8;
+    /* Referenced by the modal fields and the loading indicator, which rendered
+       borderless and transparent while these were undefined. */
+    --card-bg: #1a1a20;
+    --glass-border: rgba(255, 255, 255, 0.15);
+    /* Kept in sync with ITEM_WIDTH in app.js, which packs the cards into rows. */
+    --item-width: 320px;
     --font-main: 'Outfit', sans-serif;
     --font-kr: 'Noto Sans KR', sans-serif;
 }
@@ -110,6 +117,9 @@ button {
     height: 100vh;
     position: relative;
     cursor: grab;
+    /* Pan and pinch are handled in script; without this the browser claims the
+       gesture first and the timeline never sees a touch move. */
+    touch-action: none;
 }
 
 #timeline-container:active {
@@ -129,10 +139,11 @@ button {
 /* Timeline Items */
 .timeline-item {
     position: absolute;
-    width: 800px;
+    width: var(--item-width);
     padding: 5px;
     padding-left: 10px;
     padding-bottom: 0px;
+    overflow: hidden;
     transition: transform 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.27), box-shadow 0.3s ease;
     cursor: pointer;
     user-select: none;
@@ -140,13 +151,20 @@ button {
     background: rgba(255, 255, 255, 0.05);
 }
 
+/* Cards sit shoulder to shoulder once they are packed into rows, so a resting
+   card is one clipped line and only the hovered one opens up. */
 .timeline-item:hover {
-    transform: scale(1.05) translateY(-5px);
+    transform: translateY(-5px);
     box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
     border-color: var(--accent-color);
     z-index: 10;
     color: black;
     background: white;
+    overflow: visible;
+    width: auto;
+    min-width: var(--item-width);
+    max-width: 560px;
+    padding-bottom: 6px;
 }
 
 .timeline-item:hover .item-desc {
@@ -162,7 +180,13 @@ button {
 .item-title {
     font-weight: 600;
     margin-bottom: 8px;
-    /* Allow wrapping */
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.timeline-item:hover .item-title {
+    white-space: normal;
 }
 
 .modified-item .item-title,
@@ -246,6 +270,7 @@ button {
 
 .sheet4-label {
     position: absolute;
+    touch-action: none;
 
     font-size: 0.75rem;
     pointer-events: auto;
@@ -267,7 +292,8 @@ button {
 
 .s2-country {
     font-weight: 700;
-    color: #555555;
+    /* #555 on the near-black ground fell well under any readable contrast. */
+    color: var(--muted-color);
     text-shadow: 0 0 5px rgba(0, 0, 0, 0.8);
 }
 

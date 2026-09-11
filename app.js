@@ -4,7 +4,7 @@ const API_URL = 'https://script.google.com/macros/s/AKfycbwsd2UULk5uY0yrrXPMvaom
 let state = {
     items: [], // Sheet3 data
     sheet4Items: [], // Sheet4 data
-    horizontalScale: 4, // Horizontal zoom scale
+    horizontalScale: 4, // Horizontal zoom scale (DEFAULT_SCALE)
     offsetX: 0,
     offsetY: 0,
     isDragging: false,
@@ -40,6 +40,12 @@ const LAYER_HEIGHT = 40; // vertical distance between two layers
 const LAYER_TOP_MARGIN = 80; // top of the content to layer 1's label
 const LABEL_LINE_GAP = 20; // a label sits this far above its period line
 const CLICK_SLOP = 5; // pointer travel still counted as a click, in px
+const ITEM_WIDTH = 320; // sheet3 card width, mirrored into CSS as --item-width
+const ITEM_GAP = 8; // minimum horizontal space between two cards in a row
+const ITEM_ROW_HEIGHT = 40; // vertical distance between two packed rows
+const MIN_SCALE = 0.5;
+const MAX_SCALE = 10;
+const DEFAULT_SCALE = 4;
 
 // Layer geometry lives in these two functions alone: the render pass, the drag
 // preview and the drop calculation all used to carry their own copy of the
@@ -51,6 +57,21 @@ function layerTop(layer) {
 
 function layerFromTop(top) {
     return Math.round((top - LAYER_TOP_MARGIN) / LAYER_HEIGHT) + 1;
+}
+
+// Where the sheet3 cards begin, just below the last period layer. Derived from
+// the layer geometry rather than the hardcoded 1410 it used to be, which drifted
+// out of agreement with the layers it was meant to clear.
+function sheet3Top() {
+    return layerTop(LAYER_COUNT) + LABEL_LINE_GAP + 80;
+}
+
+// Spreadsheet text goes into innerHTML; a stray < in a title would otherwise
+// swallow the rest of the card.
+function escapeHtml(value) {
+    return textValue(value).replace(/[&<>"']/g, ch => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+    })[ch]);
 }
 
 // One year in pixels at the current zoom. Derived in three places before, which
@@ -289,12 +310,12 @@ function renderSheet4(pixelsPerYear) {
         label.style.left = `${xStart}px`;
         label.style.top = `${y}px`;
         label.innerHTML = `
-            <span class="s2-country">${item.country}</span>
-            <span class="s2-title">${item.title}</span>
+            <span class="s2-country">${escapeHtml(item.country)}</span>
+            <span class="s2-title">${escapeHtml(item.title)}</span>
         `;
 
         // DRAG AND DROP & CLICK
-        label.addEventListener('mousedown', (e) => {
+        label.addEventListener('pointerdown', (e) => {
             e.stopPropagation();
             state.isItemDragging = true;
             state.draggedDist = 0; // Reset distance
@@ -310,12 +331,18 @@ function renderSheet4(pixelsPerYear) {
 }
 
 function renderSheet3(pixelsPerYear) {
-    const sheet3TopOffset = 1410; // Increased for 31 layers (31 * 40 + 60 + margin)
+    const topOffset = sheet3Top();
 
     // Sort items by year
     const sortedItems = [...state.items].sort((a, b) => (parseInt(a.yr) || 0) - (parseInt(b.yr) || 0));
 
-    sortedItems.forEach((item, index) => {
+    // Pack the sorted cards into rows: each one drops into the first row whose
+    // previous card has already ended before this card starts. Stacking by array
+    // index instead gave every card a row of its own, a diagonal staircase
+    // 45px * n tall in which nothing about a period's density was readable.
+    const rowEnds = [];
+
+    sortedItems.forEach(item => {
         const el = document.createElement('div');
         el.className = 'timeline-item';
 
@@ -327,15 +354,19 @@ function renderSheet3(pixelsPerYear) {
         if (isNaN(year)) year = state.minYear;
 
         const x = (year - state.minYear) * pixelsPerYear;
-        const y = sheet3TopOffset + (index * 45); // Simple vertical stacking
+
+        let row = rowEnds.findIndex(end => end <= x);
+        if (row === -1) row = rowEnds.length;
+        rowEnds[row] = x + ITEM_WIDTH + ITEM_GAP;
+
+        const y = topOffset + row * ITEM_ROW_HEIGHT;
 
         el.style.left = `${x}px`;
         el.style.top = `${y}px`;
 
-        const info = item.info || '';
         el.innerHTML = `
-            <div class="item-title">${item.yr || ''} ${item.item || 'Unknown'} <span class="tag">${item.nation}</span> <span class="tag">${item.category}</span></div>
-            <div class="item-desc">${info}</div>
+            <div class="item-title">${escapeHtml(item.yr)} ${escapeHtml(item.item) || 'Unknown'} <span class="tag">${escapeHtml(item.nation)}</span> <span class="tag">${escapeHtml(item.category)}</span></div>
+            <div class="item-desc">${escapeHtml(item.info)}</div>
         `;
 
         el.addEventListener('click', (e) => {
@@ -383,10 +414,26 @@ function renderGrid() {
     }
 }
 
+// Every pointer currently down on the timeline, so a second finger can be told
+// apart from the first. Pointer events cover mouse, touch and pen alike; the
+// mouse-only handlers this replaces left the timeline completely inert on
+// phones and tablets.
+const activePointers = new Map();
+let pinch = null;
+
 // Interactions
 function setupInteractions() {
     // Drag Interaction
-    timelineContainer.addEventListener('mousedown', (e) => {
+    timelineContainer.addEventListener('pointerdown', (e) => {
+        activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+
+        if (activePointers.size === 2) {
+            beginPinch();
+            state.isDragging = false;
+            return;
+        }
+        if (activePointers.size > 2) return;
+
         state.isDragging = true;
         state.panDist = 0;
         state.lastMouseX = e.clientX;
@@ -394,7 +441,16 @@ function setupInteractions() {
         timelineContainer.style.cursor = 'grabbing';
     });
 
-    window.addEventListener('mousemove', (e) => {
+    window.addEventListener('pointermove', (e) => {
+        if (activePointers.has(e.pointerId)) {
+            activePointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+        }
+
+        if (pinch && activePointers.size >= 2) {
+            applyPinch();
+            return;
+        }
+
         if (state.isItemDragging) {
             // Travel from where the drag started, not a running sum of that
             // distance -- accumulating it made a one-pixel tremor read as a
@@ -428,7 +484,25 @@ function setupInteractions() {
         updateTransform();
     });
 
-    window.addEventListener('mouseup', async (e) => {
+    window.addEventListener('pointerup', endPointer);
+    window.addEventListener('pointercancel', endPointer);
+
+    async function endPointer(e) {
+        activePointers.delete(e.pointerId);
+
+        if (activePointers.size < 2) pinch = null;
+
+        // Lifting one finger of a pinch hands the pan back to the other one;
+        // without re-anchoring, the next move would jump by their separation.
+        if (activePointers.size === 1) {
+            const [remaining] = activePointers.values();
+            state.lastMouseX = remaining.x;
+            state.lastMouseY = remaining.y;
+            state.panDist = 0;
+            state.isDragging = true;
+            return;
+        }
+
         if (state.isItemDragging) {
             state.isItemDragging = false;
             const label = state.draggingEl;
@@ -458,13 +532,13 @@ function setupInteractions() {
 
         state.isDragging = false;
         timelineContainer.style.cursor = 'grab';
-    });
+    }
 
     // Buttons
     document.getElementById('zoom-in').style.display = 'none';
     document.getElementById('zoom-out').style.display = 'none';
     document.getElementById('reset-view').onclick = () => {
-        state.horizontalScale = 4;
+        state.horizontalScale = DEFAULT_SCALE;
         renderTimeline();
         centerView();
     };
@@ -487,37 +561,70 @@ function setupInteractions() {
         e.preventDefault();
 
         const zoomSpeed = 0.001;
-        const delta = -e.deltaY;
-        const zoomFactor = 1 + delta * zoomSpeed;
-
-        // Get mouse position relative to container
+        const zoomFactor = 1 + (-e.deltaY * zoomSpeed);
         const rect = timelineContainer.getBoundingClientRect();
-        const mouseX = e.clientX - rect.left;
 
-        // Calculate the timeline position under the mouse before zoom
-        const currentPixelsPerYear = getPixelsPerYear();
-
-        // Position in timeline coordinates (before offset)
-        const timelineX = mouseX - state.offsetX;
-
-        // Update horizontal scale
-        const newHorizontalScale = Math.max(0.5, Math.min(10, state.horizontalScale * zoomFactor));
-
-        if (newHorizontalScale !== state.horizontalScale) {
-            state.horizontalScale = newHorizontalScale;
-
-            // Adjust offset to keep the point under mouse stationary
-            const scaleDiff = getPixelsPerYear() / currentPixelsPerYear;
-            state.offsetX = mouseX - timelineX * scaleDiff;
-
-            renderTimeline();
-            updateTransform();
-        }
+        zoomTo(state.horizontalScale * zoomFactor, e.clientX - rect.left);
     }, { passive: false });
 
     // Re-render on resize
-    window.addEventListener('resize', () => {
+    window.addEventListener('resize', scheduleRender);
+}
+
+function beginPinch() {
+    const [a, b] = [...activePointers.values()];
+    const rect = timelineContainer.getBoundingClientRect();
+
+    pinch = {
+        startDist: Math.hypot(a.x - b.x, a.y - b.y) || 1,
+        startScale: state.horizontalScale,
+        lastMid: { x: (a.x + b.x) / 2 - rect.left, y: (a.y + b.y) / 2 - rect.top }
+    };
+}
+
+function applyPinch() {
+    const [a, b] = [...activePointers.values()];
+    const rect = timelineContainer.getBoundingClientRect();
+    const midX = (a.x + b.x) / 2 - rect.left;
+    const midY = (a.y + b.y) / 2 - rect.top;
+
+    // Two fingers moving together pan; two fingers spreading zoom. Handling the
+    // pan first means a pinch that barely changes separation still drags.
+    state.offsetX += midX - pinch.lastMid.x;
+    state.offsetY += midY - pinch.lastMid.y;
+    pinch.lastMid = { x: midX, y: midY };
+
+    const dist = Math.hypot(a.x - b.x, a.y - b.y) || 1;
+    zoomTo(pinch.startScale * (dist / pinch.startDist), midX);
+    updateTransform();
+}
+
+// Zoom horizontally around a fixed point, given in container coordinates, so
+// the year under the cursor or under the pinch centre stays put.
+function zoomTo(scale, anchorX) {
+    const next = Math.max(MIN_SCALE, Math.min(MAX_SCALE, scale));
+    if (next === state.horizontalScale) return;
+
+    const before = getPixelsPerYear();
+    const timelineX = anchorX - state.offsetX;
+
+    state.horizontalScale = next;
+    state.offsetX = anchorX - timelineX * (getPixelsPerYear() / before);
+
+    scheduleRender();
+}
+
+// A zoom gesture fires far more often than the screen refreshes, and each
+// render rebuilds every node in the timeline. Coalesce them into one per frame.
+let renderHandle = null;
+
+function scheduleRender() {
+    if (renderHandle !== null) return;
+
+    renderHandle = requestAnimationFrame(() => {
+        renderHandle = null;
         renderTimeline();
+        updateTransform();
     });
 }
 

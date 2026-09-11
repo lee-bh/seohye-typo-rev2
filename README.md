@@ -23,6 +23,13 @@ Two sheets back the view:
   empty or `current` for an ongoing period; `layer` is `1`–`31` and can be
   changed by dragging a label vertically.
 
+## Interaction
+
+Drag to pan, wheel or pinch to zoom horizontally, and drag a period label up or
+down to move it between layers — that write goes straight back to the sheet.
+Clicking a card or a period label opens its editor. Pointer events drive all of
+it, so mouse, touch and pen behave the same.
+
 ## Running locally
 
 The page is static, but it fetches across origins, so serve it over HTTP
