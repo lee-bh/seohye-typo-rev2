@@ -65,6 +65,7 @@ async function loadData() {
             console.log('Sheet3 items:', state.items);
             console.log('Sheet4 items:', state.sheet4Items);
 
+            syncSelectOptions();
             calculateBounds();
             renderTimeline();
         } else {
@@ -96,6 +97,60 @@ function parseRows(headers, rows, rowNumbers) {
     });
 }
 
+// index.html ships one fixed vocabulary for nation and category, but the sheet
+// is the source of truth for which values actually exist. Any value the sheet
+// uses that the dropdown lacks is added, so opening and saving a record cannot
+// silently rewrite it to whichever option happens to come first.
+function syncSelectOptions() {
+    addMissingOptions(document.getElementById('edit-nation'), state.items.map(i => i.nation));
+    addMissingOptions(document.getElementById('edit-category'), state.items.map(i => i.category));
+}
+
+function addMissingOptions(select, values) {
+    if (!select) return;
+
+    const known = new Set(Array.from(select.options).map(o => o.value));
+    const added = [];
+
+    values.forEach(raw => {
+        const value = textValue(raw).trim();
+        if (!value || known.has(value)) return;
+
+        known.add(value);
+        added.push(value);
+
+        const option = document.createElement('option');
+        option.value = value;
+        option.textContent = value;
+        option.dataset.fromSheet = 'true';
+        select.appendChild(option);
+    });
+
+    if (added.length) {
+        console.warn(`Added to #${select.id} from the sheet (not in the fixed list):`, added);
+    }
+}
+
+// Never fall back to the first option: an unmatched value is added as its own
+// option, and a genuinely empty one leaves the required select unselected so
+// the form asks for a choice instead of inventing one.
+function setSelectValue(select, value) {
+    const wanted = textValue(value).trim();
+    if (!wanted) {
+        select.selectedIndex = -1;
+        return;
+    }
+    addMissingOptions(select, [wanted]);
+    select.value = wanted;
+}
+
+// Missing spreadsheet cells arrive as undefined; assigning that to an input
+// would put the literal string "undefined" into the field, and saving would
+// write it back to the sheet.
+function textValue(value) {
+    return value === undefined || value === null ? '' : String(value);
+}
+
 function useMockData() {
     state.items = [
         { _row: 2, nation: '한국', category: '서체', yr: 1443, item: 'Hunminjeongeum', info: 'Creation of Hangul', link: '', cite: 'Annals' },
@@ -112,6 +167,7 @@ function useMockData() {
         { country: '일본', theme: '막부', begin: 1603, end: 1868, layer: 5, title: '에도 막부' },
         { country: '테스트', theme: '테스트', begin: 1950, end: null, layer: 6, title: '종료년도 없음 테스트' }
     ];
+    syncSelectOptions();
     calculateBounds();
     renderTimeline();
 }
@@ -475,13 +531,13 @@ function openEditModal(item) {
     if (item) {
         modalTitle.textContent = 'Edit Item';
         document.getElementById('edit-row').value = item._row;
-        document.getElementById('edit-nation').value = item.nation;
-        document.getElementById('edit-category').value = item.category;
-        document.getElementById('edit-yr').value = item.yr;
-        document.getElementById('edit-item').value = item.item;
-        document.getElementById('edit-info').value = item.info;
-        document.getElementById('edit-link').value = item.link;
-        document.getElementById('edit-cite').value = item.cite;
+        setSelectValue(document.getElementById('edit-nation'), item.nation);
+        setSelectValue(document.getElementById('edit-category'), item.category);
+        document.getElementById('edit-yr').value = textValue(item.yr);
+        document.getElementById('edit-item').value = textValue(item.item);
+        document.getElementById('edit-info').value = textValue(item.info);
+        document.getElementById('edit-link').value = textValue(item.link);
+        document.getElementById('edit-cite').value = textValue(item.cite);
         deleteBtn.classList.remove('hidden');
 
         deleteBtn.onclick = () => deleteItem(item._row);
@@ -504,12 +560,12 @@ function openSheet4Modal(item) {
     if (item) {
         modalTitleS4.textContent = '시대상 수정';
         document.getElementById('edit-row-s4').value = item._row;
-        document.getElementById('edit-country-s4').value = item.country;
-        document.getElementById('edit-theme-s4').value = item.theme;
-        document.getElementById('edit-begin-s4').value = item.begin;
-        document.getElementById('edit-end-s4').value = item.end;
-        document.getElementById('edit-layer-s4').value = item.layer;
-        document.getElementById('edit-title-s4').value = item.title;
+        document.getElementById('edit-country-s4').value = textValue(item.country);
+        document.getElementById('edit-theme-s4').value = textValue(item.theme);
+        document.getElementById('edit-begin-s4').value = textValue(item.begin);
+        document.getElementById('edit-end-s4').value = textValue(item.end);
+        document.getElementById('edit-layer-s4').value = textValue(item.layer);
+        document.getElementById('edit-title-s4').value = textValue(item.title);
         deleteBtnS4.classList.remove('hidden');
 
         deleteBtnS4.onclick = () => deleteItem(item._row, 'sheet4');
