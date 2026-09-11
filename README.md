@@ -7,10 +7,17 @@ typography, rendered from a Google Spreadsheet.
 
 | Path | Role |
 | --- | --- |
-| `index.html` | Page shell, edit/add modals, about modal |
-| `app.js` | Data loading, timeline layout, interaction, spreadsheet writes |
+| `index.html` | Public page — read-only view of the timeline |
+| `admin.html` | Editing page — same timeline behind a password |
+| `app.js` | Data loading, timeline layout, pan and zoom; shared by both pages |
+| `admin.js` | Login gate, edit dialogs and spreadsheet writes; `admin.html` only |
 | `style.css` | Styling |
 | `apps-script/Code.gs` | Spreadsheet API used as the database ([details](apps-script/README.md)) |
+
+`app.js` renders a read-only timeline and exposes `editHooks`. `admin.js` fills
+those hooks in, which is what makes cards clickable and period labels
+draggable — so `index.html`, which loads `app.js` alone, has no path to a write
+at all.
 
 ## Data model
 
@@ -23,12 +30,27 @@ Two sheets back the view:
   empty or `current` for an ongoing period; `layer` is `1`–`31` and can be
   changed by dragging a label vertically.
 
+## Editing
+
+`admin.html` asks for a password before it loads anything. The password is
+checked by the Apps Script backend, not by the page: the hash is sent to the
+`auth` action to unlock, kept in `sessionStorage` for that tab, and attached to
+every write. A check in the page's own JavaScript would be decorative, since the
+`/exec` endpoint can be posted to directly — so the endpoint is what enforces it,
+and reads stay public for `index.html`.
+
+Set the password with `setAdminPassword()` once in the Apps Script editor; see
+[`apps-script/README.md`](apps-script/README.md#the-admin-password). Until it is
+set, every write is refused.
+
 ## Interaction
 
-Drag to pan, wheel or pinch to zoom horizontally, and drag a period label up or
-down to move it between layers — that write goes straight back to the sheet.
-Clicking a card or a period label opens its editor. Pointer events drive all of
-it, so mouse, touch and pen behave the same.
+Drag to pan and wheel or pinch to zoom horizontally, on both pages. Pointer
+events drive all of it, so mouse, touch and pen behave the same.
+
+In `admin.html` only: clicking a card or a period label opens its editor, and
+dragging a period label up or down moves it between layers, writing straight
+back to the sheet.
 
 ## Running locally
 

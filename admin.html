@@ -1,0 +1,225 @@
+<!DOCTYPE html>
+<html lang="ja">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>年表管理 — East Asian Typography History</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;700&family=Outfit:wght@300;400;600&display=swap"
+        rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body class="admin-mode">
+    <div id="app">
+        <header>
+            <h1>年表管理</h1>
+            <div class="controls">
+                <a class="icon-btn" href="index.html" aria-label="View page" title="閲覧ページ">閲覧</a>
+                <button id="reset-view" class="icon-btn" aria-label="Reset View">更新</button>
+                <button id="about-btn" class="icon-btn" aria-label="About">説明</button>
+                <button id="add-sheet4-btn" class="primary-btn">時代区分（新規）</button>
+                <button id="add-item-btn" class="primary-btn">項目（追加）</button>
+                <button id="logout-btn" class="icon-btn" aria-label="Log out" title="ログアウト">終了</button>
+            </div>
+        </header>
+
+        <main id="timeline-container">
+            <div id="timeline-axis"></div>
+            <div id="timeline-content">
+                <!-- Timeline items will be injected here -->
+            </div>
+        </main>
+
+        <!-- Edit/Add Modal -->
+        <div id="modal-overlay" class="hidden">
+            <div class="modal">
+                <div class="modal-header">
+                    <h2 id="modal-title">項目編集</h2>
+                    <button id="close-modal" class="close-btn">&times;</button>
+                </div>
+                <form id="item-form">
+                    <input type="hidden" name="_row" id="edit-row">
+
+                    <div class="form-group">
+                        <label for="edit-nation">国</label>
+                        <select name="nation" id="edit-nation" required>
+                            <option value="韓国">韓国</option>
+                            <option value="中国">中国</option>
+                            <option value="日本">日本</option>
+                            <option value="その他">その他</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="edit-category">カテゴリー</label>
+                        <select name="category" id="edit-category" required>
+                            <option value="条約">条約</option>
+                            <option value="学会">学会</option>
+                            <option value="出版">出版</option>
+                            <option value="展示">展示</option>
+                            <option value="教育">教育</option>
+                            <option value="研究">研究</option>
+                            <option value="字体">字体</option>
+                            <option value="標準">標準</option>
+                            <option value="制度">制度</option>
+                            <option value="政策">政策</option>
+                            <option value="サービス">サービス</option>
+                            <option value="傾向">傾向</option>
+                            <option value="技術">技術</option>
+                            <option value="理論">理論</option>
+                            <option value="運動">運動</option>
+                            <option value="広告">広告</option>
+                            <option value="芸術">芸術</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="edit-yr">年</label>
+                        <input type="number" name="yr" id="edit-yr" required placeholder="e.g. 1443">
+                    </div>
+
+                    <div class="form-group">
+                        <label for="edit-item">項目名</label>
+                        <input type="text" name="item" id="edit-item" required placeholder="Item Title">
+                    </div>
+
+                    <div class="form-group">
+                        <label for="edit-info">説明</label>
+                        <textarea name="info" id="edit-info" rows="3" placeholder="Details..."></textarea>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="edit-link">リンク</label>
+                        <input type="url" name="link" id="edit-link" placeholder="https://...">
+                    </div>
+
+                    <div class="form-group">
+                        <label for="edit-cite">引用</label>
+                        <input type="text" name="cite" id="edit-cite" placeholder="Source">
+                    </div>
+
+                    <div class="modal-actions">
+                        <button type="button" id="delete-btn" class="danger-btn hidden">Delete</button>
+                        <button type="submit" class="primary-btn">Save Changes</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <div id="loading-indicator" class="hidden">
+            <div class="spinner"></div>
+            <span>読み込み中...</span>
+        </div>
+    </div>
+
+    <!-- Sheet4 Modal -->
+    <div id="modal-overlay-s4" class="hidden">
+        <div class="modal">
+            <div class="modal-header">
+                <h2 id="modal-title-s4">時代区分（新規）</h2>
+                <button id="close-modal-s4" class="close-btn">&times;</button>
+            </div>
+            <form id="item-form-s4">
+                <input type="hidden" name="_row" id="edit-row-s4">
+                <input type="hidden" name="sheet" value="sheet4">
+
+                <div class="form-group">
+                    <label for="edit-country-s4">国</label>
+                    <input type="text" name="country" id="edit-country-s4" required placeholder="e.g. 한국">
+                </div>
+
+                <div class="form-group">
+                    <label for="edit-theme-s4">大項目</label>
+                    <input type="text" name="theme" id="edit-theme-s4" required placeholder="e.g. 왕조">
+                </div>
+
+                <div class="form-group">
+                    <label for="edit-begin-s4">開始年</label>
+                    <input type="number" name="begin" id="edit-begin-s4" required placeholder="e.g. 1392">
+                </div>
+
+                <div class="form-group">
+                    <label for="edit-end-s4">終了年（継続中は空欄または current）</label>
+                    <input type="text" name="end" id="edit-end-s4" placeholder="e.g. 1910 / current / 空欄">
+                </div>
+
+                <div class="form-group">
+                    <label for="edit-layer-s4">レイヤー(1-31)</label>
+                    <input type="number" name="layer" id="edit-layer-s4" required min="1" max="31" placeholder="1-31">
+                </div>
+
+                <div class="form-group">
+                    <label for="edit-title-s4">内容</label>
+                    <input type="text" name="title" id="edit-title-s4" required placeholder="e.g. 조선시대">
+                </div>
+
+                <div class="modal-actions">
+                    <button type="button" id="delete-btn-s4" class="danger-btn hidden">削除</button>
+                    <button type="submit" class="primary-btn">保存</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- About Modal -->
+    <div id="modal-overlay-about" class="hidden">
+        <div class="modal about-modal">
+            <div class="modal-header">
+                <h2>デジタル東アジア・タイポグラフィ年表</h2>
+                <button id="close-modal-about" class="close-btn">&times;</button>
+            </div>
+            <div class="modal-body about-content">
+                <p>本デジタル年表は、2000年以降の東アジアにおけるタイポグラフィの変化の過程を時間軸の中で捉え、地域・テーマ・制度・展覧会・視覚表現の関係を横断的に比較・探索できるよう設計された研究基盤プラットフォームです。個別の作品や出来事を断片的に並べるのではなく、多様な要素がどのように連関し、同時代の動向を形成しているのかを立体的に可視化します。
+                </p>
+
+                <p>本年表は、「構造–媒介–表現」という三つの層の視点に基づいて構成されています。構造とは、政策、制度、教育、技術環境といった社会的・制度的条件を指し、媒介は、ビエンナーレ、展覧会、教育プログラム、国際交流、プラットフォーム、出版など、多様な接続装置を含みます。表現は、書体、グラフィック作品、展示成果など、可視的なデザインのアウトプットを指します。これら三つの層は相互に影響し合いながら、時間の中で同時に機能します。
+                </p>
+
+                <p>本年表では、東アジア各国における構造的変化や主要なプロジェクト、展覧会、参加者、視覚資料を、年・国・テーマ・関係情報として連結し、利用者が特定の時期や地域、イシューを起点に流れを比較し、文脈を容易に把握できるよう設計されています。これにより、個別事例が生まれた背景条件や展開のプロセス、同時代的な交差の様様を自然に読み取ることができます。
+                </p>
+
+                <p>本デジタル年表は、研究者、デザイナー、学生、キュレーターが、東アジア・タイポグラフィの形成と変化を直感的に理解し、長期的な動向と構造的関係を探究できるオープンな研究ツールを目指しています。</p>
+
+                <p class="note">※本年表は継続的に更新・拡張される研究プロジェクトであり、現在未収録の領域については、今後の研究および資料の蓄積に応じて段階的に追加される予定です。</p>
+
+                <p class="note">※本アーカイブは、DNP文化振興財団 グラフィック文化に関する学術研究助成の採択研究、文部科学省科学研究費助成事業（基盤研究C）採択研究の一環として制作されました.</p>
+
+                <div class="credits">
+                    <p>Research & Curation: 서혜 (ソーヘー / Seo Hye)</p>
+                    <p>Design & Development: 이병학 (イ・ビョンハク / Lee Byounghak)</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Login gate. The password is checked by the Apps Script backend, not
+         here: this form only submits it. -->
+    <div id="login-overlay">
+        <form id="login-form" class="modal login-modal">
+            <h2>年表管理</h2>
+            <p class="login-note">編集するにはパスワードを入力してください。</p>
+
+            <div class="form-group">
+                <label for="login-password">パスワード</label>
+                <input type="password" id="login-password" name="password" required autocomplete="current-password"
+                    autofocus>
+            </div>
+
+            <p id="login-error" class="login-error hidden" role="alert"></p>
+
+            <div class="modal-actions">
+                <a class="icon-btn" href="index.html">閲覧</a>
+                <button type="submit" id="login-submit" class="primary-btn">開く</button>
+            </div>
+        </form>
+    </div>
+
+    <script src="app.js?v=3"></script>
+    <script src="admin.js?v=1"></script>
+</body>
+
+</html>

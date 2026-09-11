@@ -20,7 +20,21 @@
  *   ?action=delete&sheet=sheet3&_row=12
  *     -> { status, _row }
  *
+ *   ?action=auth&token=<hash>
+ *     -> { status }          (used by admin.html's login screen)
+ *
  * Every response is JSON with a `status` of 'success' or 'error'.
+ *
+ * Reads are public; create, update and delete require `token`. The token is a
+ * SHA-256 hash of the admin password, computed in the browser so the password
+ * itself is never transmitted or written to the execution log. Run
+ * setAdminPassword() once from the editor to store the matching hash.
+ *
+ * This is one shared password, not per-user accounts: anyone who knows it can
+ * write, and anyone holding the hash can write without knowing the password.
+ * It is a real server-side gate -- a check in the page's own JavaScript would
+ * not be, since the endpoint is reachable directly -- but it is not an identity
+ * system, so rotate the password when someone should no longer have access.
  */
 
 // Columns used when a sheet has to be created from scratch. Existing sheets
@@ -32,8 +46,15 @@ var DEFAULT_HEADERS = {
 
 var DEFAULT_SHEET = 'sheet3';
 
+// Script Property holding the SHA-256 hash of PASSWORD_PREFIX + the password.
+var ADMIN_HASH_PROPERTY = 'ADMIN_TOKEN_HASH';
+
+// Mixed into the password before hashing, so a leaked hash cannot be looked up
+// in a generic rainbow table. Must match PASSWORD_PREFIX in admin.js.
+var PASSWORD_PREFIX = 'seohye-typo:';
+
 // Parameters that carry routing information rather than cell values.
-var RESERVED_PARAMS = { action: true, sheet: true, _row: true, callback: true };
+var RESERVED_PARAMS = { action: true, sheet: true, _row: true, callback: true, token: true };
 
 function doGet(e) {
     return handleRequest(e);
@@ -55,6 +76,17 @@ function handleRequest(e) {
         } catch (err) {
             return jsonOut(errorOf(err));
         }
+    }
+
+    if (action === 'auth') {
+        return jsonOut(isAuthorized(params.token)
+            ? { status: 'success' }
+            : authFailure(params.token));
+    }
+
+    // Everything below this line writes to the spreadsheet.
+    if (!isAuthorized(params.token)) {
+        return jsonOut(authFailure(params.token));
     }
 
     var lock = LockService.getScriptLock();
@@ -80,6 +112,66 @@ function handleRequest(e) {
     } finally {
         lock.releaseLock();
     }
+}
+
+/* ------------------------------------------------------------------- auth */
+
+/**
+ * Run this once from the Apps Script editor to set the admin password, then
+ * clear the literal below and save again so it is not left in the source.
+ * The password itself is never stored -- only its hash.
+ */
+function setAdminPassword() {
+    var password = 'CHANGE-ME';
+
+    if (!password || password === 'CHANGE-ME') {
+        throw new Error('Edit the password in setAdminPassword() before running it.');
+    }
+    PropertiesService.getScriptProperties()
+        .setProperty(ADMIN_HASH_PROPERTY, sha256Hex(PASSWORD_PREFIX + password));
+
+    Logger.log('Admin password set. Clear the literal from setAdminPassword() now.');
+}
+
+function isAuthorized(token) {
+    var expected = PropertiesService.getScriptProperties().getProperty(ADMIN_HASH_PROPERTY);
+    if (!expected) return false;
+    return constantTimeEquals(String(token || ''), expected);
+}
+
+function authFailure(token) {
+    var configured = PropertiesService.getScriptProperties().getProperty(ADMIN_HASH_PROPERTY);
+    if (!configured) {
+        return {
+            status: 'error',
+            code: 'not_configured',
+            message: 'Admin password is not configured. Run setAdminPassword() once in the Apps Script editor.'
+        };
+    }
+
+    // Slow down guessing. A counter would be a way to lock the owner out, so
+    // this stays a delay rather than a lockout.
+    if (token) Utilities.sleep(500);
+
+    return { status: 'error', code: 'unauthorized', message: 'Wrong password.' };
+}
+
+function sha256Hex(value) {
+    var bytes = Utilities.computeDigest(
+        Utilities.DigestAlgorithm.SHA_256, value, Utilities.Charset.UTF_8);
+
+    return bytes.map(function (b) {
+        return ((b & 0xff) + 0x100).toString(16).slice(1);
+    }).join('');
+}
+
+// Compares in time that does not depend on where the first difference falls.
+function constantTimeEquals(a, b) {
+    var diff = a.length ^ b.length;
+    for (var i = 0; i < a.length && i < b.length; i++) {
+        diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+    }
+    return diff === 0;
 }
 
 /* ---------------------------------------------------------------- actions */

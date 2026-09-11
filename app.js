@@ -30,9 +30,20 @@ function getSignature(item) {
 const app = document.getElementById('app');
 const timelineContainer = document.getElementById('timeline-container');
 const timelineContent = document.getElementById('timeline-content');
-const modalOverlay = document.getElementById('modal-overlay');
-const itemForm = document.getElementById('item-form');
 const loadingIndicator = document.getElementById('loading-indicator');
+
+// Editing lives in admin.js, which fills these in. index.html loads this file
+// alone and stays read-only: no modals, no writes, nothing to authorise.
+const editHooks = {
+    onDataLoaded: null, // () => void, after every successful load
+    onItemClick: null, // (item) => void, a sheet3 card was clicked
+    onPeriodClick: null, // (item) => void, a sheet4 label was clicked
+    onPeriodMove: null // (item, newLayer) => Promise, a label was dragged
+};
+
+function isEditable() {
+    return editHooks.onItemClick !== null;
+}
 
 // Constants
 const LAYER_COUNT = 31; // sheet4 stacks periods across this many layers
@@ -86,7 +97,6 @@ function getPixelsPerYear() {
 // Initialize
 async function init() {
     setupInteractions();
-    setupForm();
     await loadData();
     centerView();
 }
@@ -110,7 +120,7 @@ async function loadData() {
             console.log('Sheet3 items:', state.items);
             console.log('Sheet4 items:', state.sheet4Items);
 
-            syncSelectOptions();
+            if (editHooks.onDataLoaded) editHooks.onDataLoaded();
             calculateBounds();
             renderTimeline();
         } else {
@@ -142,53 +152,6 @@ function parseRows(headers, rows, rowNumbers) {
     });
 }
 
-// index.html ships one fixed vocabulary for nation and category, but the sheet
-// is the source of truth for which values actually exist. Any value the sheet
-// uses that the dropdown lacks is added, so opening and saving a record cannot
-// silently rewrite it to whichever option happens to come first.
-function syncSelectOptions() {
-    addMissingOptions(document.getElementById('edit-nation'), state.items.map(i => i.nation));
-    addMissingOptions(document.getElementById('edit-category'), state.items.map(i => i.category));
-}
-
-function addMissingOptions(select, values) {
-    if (!select) return;
-
-    const known = new Set(Array.from(select.options).map(o => o.value));
-    const added = [];
-
-    values.forEach(raw => {
-        const value = textValue(raw).trim();
-        if (!value || known.has(value)) return;
-
-        known.add(value);
-        added.push(value);
-
-        const option = document.createElement('option');
-        option.value = value;
-        option.textContent = value;
-        option.dataset.fromSheet = 'true';
-        select.appendChild(option);
-    });
-
-    if (added.length) {
-        console.warn(`Added to #${select.id} from the sheet (not in the fixed list):`, added);
-    }
-}
-
-// Never fall back to the first option: an unmatched value is added as its own
-// option, and a genuinely empty one leaves the required select unselected so
-// the form asks for a choice instead of inventing one.
-function setSelectValue(select, value) {
-    const wanted = textValue(value).trim();
-    if (!wanted) {
-        select.selectedIndex = -1;
-        return;
-    }
-    addMissingOptions(select, [wanted]);
-    select.value = wanted;
-}
-
 // Missing spreadsheet cells arrive as undefined; assigning that to an input
 // would put the literal string "undefined" into the field, and saving would
 // write it back to the sheet.
@@ -212,7 +175,7 @@ function useMockData() {
         { country: '일본', theme: '막부', begin: 1603, end: 1868, layer: 5, title: '에도 막부' },
         { country: '테스트', theme: '테스트', begin: 1950, end: null, layer: 6, title: '종료년도 없음 테스트' }
     ];
-    syncSelectOptions();
+    if (editHooks.onDataLoaded) editHooks.onDataLoaded();
     calculateBounds();
     renderTimeline();
 }
@@ -315,7 +278,7 @@ function renderSheet4(pixelsPerYear) {
         `;
 
         // DRAG AND DROP & CLICK
-        label.addEventListener('pointerdown', (e) => {
+        if (isEditable()) label.addEventListener('pointerdown', (e) => {
             e.stopPropagation();
             state.isItemDragging = true;
             state.draggedDist = 0; // Reset distance
@@ -369,12 +332,12 @@ function renderSheet3(pixelsPerYear) {
             <div class="item-desc">${escapeHtml(item.info)}</div>
         `;
 
-        el.addEventListener('click', (e) => {
+        if (isEditable()) el.addEventListener('click', (e) => {
             e.stopPropagation();
             // Dragging the canvas by an item still pans it, and the click that
             // follows would otherwise open this record's editor on release.
             if (state.panDist > CLICK_SLOP) return;
-            openEditModal(item);
+            editHooks.onItemClick(item);
         });
 
         timelineContent.appendChild(el);
@@ -516,10 +479,10 @@ function setupInteractions() {
 
             if (newLayer !== parseInt(item.layer)) {
                 item.layer = newLayer;
-                await updateItemLayer(item._row, newLayer);
+                await editHooks.onPeriodMove(item, newLayer);
             } else if (state.draggedDist < CLICK_SLOP) {
                 // It was a click, not a significant drag
-                openSheet4Modal(item);
+                editHooks.onPeriodClick(item);
             } else {
                 // Snap back if no change but was a drag
                 renderTimeline();
@@ -535,26 +498,24 @@ function setupInteractions() {
     }
 
     // Buttons
-    document.getElementById('zoom-in').style.display = 'none';
-    document.getElementById('zoom-out').style.display = 'none';
     document.getElementById('reset-view').onclick = () => {
         state.horizontalScale = DEFAULT_SCALE;
         renderTimeline();
         centerView();
-    };
-    document.getElementById('reset-view').style.display = 'flex'; // Show reset button
-
-    document.getElementById('add-sheet4-btn').onclick = () => {
-        openSheet4Modal(null);
     };
 
     document.getElementById('about-btn').onclick = () => {
         document.getElementById('modal-overlay-about').classList.remove('hidden');
     };
 
-    document.getElementById('add-item-btn').onclick = () => {
-        openEditModal(null);
+    document.getElementById('close-modal-about').onclick = () => {
+        document.getElementById('modal-overlay-about').classList.add('hidden');
     };
+
+    const aboutOverlay = document.getElementById('modal-overlay-about');
+    aboutOverlay.addEventListener('click', (e) => {
+        if (e.target === aboutOverlay) aboutOverlay.classList.add('hidden');
+    });
 
     // Wheel zoom (horizontal only)
     timelineContainer.addEventListener('wheel', (e) => {
@@ -649,214 +610,13 @@ function updateTransform() {
     }
 }
 
-// Modal & Form
-function openEditModal(item) {
-    const modalTitle = document.getElementById('modal-title');
-    const deleteBtn = document.getElementById('delete-btn');
-
-    if (item) {
-        modalTitle.textContent = 'Edit Item';
-        document.getElementById('edit-row').value = item._row;
-        setSelectValue(document.getElementById('edit-nation'), item.nation);
-        setSelectValue(document.getElementById('edit-category'), item.category);
-        document.getElementById('edit-yr').value = textValue(item.yr);
-        document.getElementById('edit-item').value = textValue(item.item);
-        document.getElementById('edit-info').value = textValue(item.info);
-        document.getElementById('edit-link').value = textValue(item.link);
-        document.getElementById('edit-cite').value = textValue(item.cite);
-        deleteBtn.classList.remove('hidden');
-
-        deleteBtn.onclick = () => deleteItem(item._row);
-    } else {
-        modalTitle.textContent = 'Add New Item';
-        itemForm.reset();
-        document.getElementById('edit-row').value = '';
-        deleteBtn.classList.add('hidden');
-    }
-
-    modalOverlay.classList.remove('hidden');
-}
-
-function openSheet4Modal(item) {
-    const modalOverlayS4 = document.getElementById('modal-overlay-s4');
-    const modalTitleS4 = document.getElementById('modal-title-s4');
-    const deleteBtnS4 = document.getElementById('delete-btn-s4');
-    const formS4 = document.getElementById('item-form-s4');
-
-    if (item) {
-        modalTitleS4.textContent = '시대상 수정';
-        document.getElementById('edit-row-s4').value = item._row;
-        document.getElementById('edit-country-s4').value = textValue(item.country);
-        document.getElementById('edit-theme-s4').value = textValue(item.theme);
-        document.getElementById('edit-begin-s4').value = textValue(item.begin);
-        document.getElementById('edit-end-s4').value = textValue(item.end);
-        document.getElementById('edit-layer-s4').value = textValue(item.layer);
-        document.getElementById('edit-title-s4').value = textValue(item.title);
-        deleteBtnS4.classList.remove('hidden');
-
-        deleteBtnS4.onclick = () => deleteItem(item._row, 'sheet4');
-    } else {
-        modalTitleS4.textContent = '시대상 추가';
-        formS4.reset();
-        document.getElementById('edit-row-s4').value = '';
-        deleteBtnS4.classList.add('hidden');
-    }
-
-    modalOverlayS4.classList.remove('hidden');
-}
-
-// Saving used to hide the sheet3 overlay only, so a sheet4 period stayed on
-// screen behind its own modal after it had already been written.
-function closeModals() {
-    ['modal-overlay', 'modal-overlay-s4', 'modal-overlay-about'].forEach(id => {
-        document.getElementById(id).classList.add('hidden');
-    });
-}
-
-function setupForm() {
-    // Sheet1 Close
-    document.getElementById('close-modal').onclick = () => {
-        modalOverlay.classList.add('hidden');
-    };
-
-    // Sheet4 Close
-    document.getElementById('close-modal-s4').onclick = () => {
-        document.getElementById('modal-overlay-s4').classList.add('hidden');
-    };
-
-    // About Close
-    document.getElementById('close-modal-about').onclick = () => {
-        document.getElementById('modal-overlay-about').classList.add('hidden');
-    };
-
-    // Overlay clicks
-    window.addEventListener('click', (e) => {
-        if (e.target === modalOverlay) modalOverlay.classList.add('hidden');
-        const s4Overlay = document.getElementById('modal-overlay-s4');
-        if (e.target === s4Overlay) s4Overlay.classList.add('hidden');
-        const aboutOverlay = document.getElementById('modal-overlay-about');
-        if (e.target === aboutOverlay) aboutOverlay.classList.add('hidden');
-    });
-
-    // Sheet1 Submit
-    itemForm.onsubmit = async (e) => {
-        e.preventDefault();
-        const formData = new FormData(itemForm);
-        const data = Object.fromEntries(formData.entries());
-        const action = data._row ? 'update' : 'create';
-        await sendData(action, data);
-    };
-
-    // Sheet4 Submit
-    const formS4 = document.getElementById('item-form-s4');
-    formS4.onsubmit = async (e) => {
-        e.preventDefault();
-        const formData = new FormData(formS4);
-        const data = Object.fromEntries(formData.entries());
-        const action = data._row ? 'update' : 'create';
-        await sendData(action, data);
-    };
-}
-
-async function updateItemLayer(row, newLayer) {
-    showLoading(true);
-    try {
-        const params = new URLSearchParams();
-        params.append('action', 'update');
-        params.append('sheet', 'sheet4');
-        params.append('_row', row);
-        params.append('layer', newLayer);
-
-        const response = await fetch(`${API_URL}`, {
-            method: 'POST',
-            body: params
-        });
-
-        const result = await response.json();
-        if (result.status === 'success') {
-            alert('변경완료');
-            await loadData(); // Reload for accuracy
-        } else {
-            alert('Error: ' + result.message);
-            renderTimeline(); // Reset view
-        }
-    } catch (error) {
-        console.error('Update error:', error);
-        alert('Failed to update layer.');
-        renderTimeline();
-    } finally {
-        showLoading(false);
-    }
-}
-
-async function sendData(action, data) {
-    showLoading(true);
-    closeModals();
-
-    try {
-        // Convert data to URLSearchParams for POST body
-        const params = new URLSearchParams();
-        for (const key in data) {
-            params.append(key, data[key]);
-        }
-
-        const response = await fetch(`${API_URL}?action=${action}`, {
-            method: 'POST',
-            body: params
-        });
-
-        const result = await response.json();
-        if (result.status === 'success') {
-            // Add signature to modified set
-            // data contains the fields we need
-            state.modifiedSignatures.add(getSignature(data));
-
-            await loadData(); // Reload to see changes
-        } else {
-            alert('Error: ' + result.message);
-        }
-    } catch (error) {
-        console.error('Save error:', error);
-        alert('Failed to save. Check console.');
-    } finally {
-        showLoading(false);
-    }
-}
-
-async function deleteItem(row, sheetName = 'sheet3') {
-    if (!confirm('Are you sure you want to delete this item?')) return;
-
-    showLoading(true);
-    closeModals();
-
-    try {
-        const params = new URLSearchParams();
-        params.append('_row', row);
-        params.append('sheet', sheetName);
-
-        const response = await fetch(`${API_URL}?action=delete`, {
-            method: 'POST',
-            body: params
-        });
-
-        const result = await response.json();
-        if (result.status === 'success') {
-            await loadData();
-        } else {
-            alert('Error: ' + result.message);
-        }
-    } catch (error) {
-        console.error('Delete error:', error);
-        alert('Failed to delete.');
-    } finally {
-        showLoading(false);
-    }
-}
-
 function showLoading(show) {
     if (show) loadingIndicator.classList.remove('hidden');
     else loadingIndicator.classList.add('hidden');
 }
 
-// Start
-init();
+// Start. admin.html holds this back until the password has been accepted;
+// index.html has nothing to unlock and starts straight away.
+if (!document.body.classList.contains('admin-mode')) {
+    init();
+}

@@ -29,9 +29,10 @@ All endpoints accept GET or POST. POST bodies must be
 | Action | Parameters | Response |
 | --- | --- | --- |
 | `read` | `sheet` | `{ status, data: { headers, rows, rowNumbers } }` |
-| `create` | `sheet`, one parameter per column | `{ status, _row }` |
-| `update` | `sheet`, `_row`, the columns to change | `{ status, _row, updated }` |
-| `delete` | `sheet`, `_row` | `{ status, _row }` |
+| `create` | `token`, `sheet`, one parameter per column | `{ status, _row }` |
+| `update` | `token`, `sheet`, `_row`, the columns to change | `{ status, _row, updated }` |
+| `delete` | `token`, `sheet`, `_row` | `{ status, _row }` |
+| `auth` | `token` | `{ status }` |
 
 `rowNumbers[i]` is the real 1-based sheet row for `rows[i]`. The client uses it
 for edits and deletes instead of inferring row numbers from the array index,
@@ -45,6 +46,29 @@ without blanking the rest of the record.
 
 Write actions are serialised with `LockService` so concurrent edits cannot
 shift row numbers underneath one another.
+
+## The admin password
+
+Reads are public — `index.html` needs them. Every write requires `token`, the
+SHA-256 hash of `seohye-typo:` + the password, computed in the browser so the
+password itself is never sent or written to the execution log. `admin.html`
+collects the password, sends the hash once to `auth` to unlock, and attaches it
+to every write after that.
+
+This check has to live here rather than in the page, because the endpoint is
+reachable directly: a password checked in `admin.js` would stop nobody from
+POSTing to the `/exec` URL themselves.
+
+To set it, open `setAdminPassword()` in the editor, replace `CHANGE-ME` with the
+password, run the function once, then clear the literal and save again. The hash
+lands in the script property `ADMIN_TOKEN_HASH`; the password is not stored
+anywhere. Until it is set, every write is refused with `code: not_configured`.
+
+What this is and is not: it is one shared password giving a real server-side
+gate, and a wrong guess costs a round trip plus a half-second delay. It is not
+an identity system — anyone holding the password, or the hash, can write, and
+the log will not say who did. Rotate it when someone should no longer have
+access.
 
 ## Deploying
 
