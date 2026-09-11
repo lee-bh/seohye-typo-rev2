@@ -59,8 +59,8 @@ async function loadData() {
         const json2 = await res2.json();
 
         if (json1.status === 'success' && json2.status === 'success') {
-            state.items = parseRows(json1.data.headers, json1.data.rows);
-            state.sheet4Items = parseRows(json2.data.headers, json2.data.rows);
+            state.items = parseRows(json1.data.headers, json1.data.rows, json1.data.rowNumbers);
+            state.sheet4Items = parseRows(json2.data.headers, json2.data.rows, json2.data.rowNumbers);
 
             console.log('Sheet3 items:', state.items);
             console.log('Sheet4 items:', state.sheet4Items);
@@ -80,13 +80,18 @@ async function loadData() {
     }
 }
 
-function parseRows(headers, rows) {
+function parseRows(headers, rows, rowNumbers) {
     return rows.map((row, index) => {
         const item = {};
         headers.forEach((header, i) => {
             item[header.toLowerCase()] = row[i];
         });
-        item._row = index + 2; // Sheet row index (1-based, header is 1)
+
+        // The backend reports the real sheet row for each record. Older
+        // deployments do not, so fall back to guessing from the array index --
+        // which is only correct while the sheet holds no blank rows.
+        const reported = rowNumbers && rowNumbers[index];
+        item._row = parseInt(reported, 10) || index + 2;
         return item;
     });
 }
