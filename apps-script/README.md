@@ -5,10 +5,13 @@ this repository so the database layer is versioned alongside the front-end — a
 redeployment that changes the `/exec` URL should never leave the server logic
 unrecoverable.
 
-> **Check this against your live deployment.** This file was reconstructed from
-> the request/response contract the front-end relies on. If the currently
-> deployed script differs, copy the live source over this file (or apply your
-> changes here and redeploy) so the two stay in sync.
+This file is the deployed script as of 2026-09, with three additions: the admin
+password gate, `rowNumbers` in `read`, and a `LockService` around writes.
+
+> **`admin.html` does not work until this is deployed.** The live script has no
+> `auth` action, so the login screen gets "Invalid GET action" and never
+> unlocks — and until then writes are still accepted from anyone. Push this
+> file, redeploy, and run `setAdminPassword()` before using the admin page.
 
 ## Spreadsheet layout
 
@@ -21,6 +24,10 @@ Header names are matched case-insensitively, and the client lowercases them, so
 `Nation` and `nation` behave identically. `sheet4.end` may be left empty or set
 to `current` for an ongoing period. `sheet4.layer` is `1`–`31`.
 
+The client always asks for `sheet3` and `sheet4`; `getSheet()` resolves those to
+the actual tabs, falling back to `Sheet3`/`시트1` and `Sheet4`/`시트2`. Renaming a
+tab to something else means adding it there.
+
 ## API
 
 All endpoints accept GET or POST. POST bodies must be
@@ -29,16 +36,19 @@ All endpoints accept GET or POST. POST bodies must be
 | Action | Parameters | Response |
 | --- | --- | --- |
 | `read` | `sheet` | `{ status, data: { headers, rows, rowNumbers } }` |
-| `create` | `token`, `sheet`, one parameter per column | `{ status, _row }` |
-| `update` | `token`, `sheet`, `_row`, the columns to change | `{ status, _row, updated }` |
-| `delete` | `token`, `sheet`, `_row` | `{ status, _row }` |
+| `create` | `token`, `sheet`, one parameter per column | `{ status, data }` |
+| `update` | `token`, `sheet`, `_row`, the columns to change | `{ status, data }` |
+| `delete` | `token`, `sheet`, `_row` | `{ status, data }` |
 | `auth` | `token` | `{ status }` |
 
-`rowNumbers[i]` is the real 1-based sheet row for `rows[i]`. The client uses it
-for edits and deletes instead of inferring row numbers from the array index,
-which silently targeted the wrong record whenever the sheet contained a blank
-row. Clients that predate `rowNumbers` still work — they fall back to the
-index-based guess.
+A refused write answers `{ status: "error", code, message }`, where `code` is
+`unauthorized` or `not_configured` — the page branches on it to re-lock itself.
+
+`rowNumbers[i]` is the real 1-based sheet row for `rows[i]`, and blank rows are
+skipped. The client uses it for edits and deletes instead of inferring row
+numbers from the array index, which silently targeted the wrong record for
+everything below a blank row. Clients that predate `rowNumbers` still work —
+they fall back to the index-based guess.
 
 `update` is a partial write: only the columns present in the request are
 touched, so dragging a `sheet4` label to a new layer sends `layer` alone
