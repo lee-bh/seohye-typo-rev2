@@ -1,4 +1,4 @@
-const API_URL = 'https://script.google.com/macros/s/AKfycbwsd2UULk5uY0yrrXPMvaom_pi8HV9QeFLbUrHdsmMsGkesZkL8NoIqNRNiqg2VOMs2/exec';
+const API_URL = 'https://script.google.com/macros/s/AKfycbzPIExsHzV_XBuAS9YaOJ7Wxpir9-DE_ZZQsNsp6YmfkIvpe5VZ7tpX_bMrNXY-OA9P/exec';
 
 // State
 let state = {
