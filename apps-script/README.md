@@ -15,18 +15,19 @@ password gate, `rowNumbers` in `read`, and a `LockService` around writes.
 
 ## Spreadsheet layout
 
-| Sheet | Header row (row 1) |
+| Tab | Header row (row 1) |
 | --- | --- |
-| `sheet3` | `nation`, `category`, `yr`, `item`, `info`, `link`, `cite` |
-| `sheet4` | `country`, `theme`, `begin`, `end`, `layer`, `title` |
+| `Sheet3` | `nation`, `category`, `yr`, `item`, `info`, `link`, `cite` |
+| `Sheet4` | `country`, `theme`, `begin`, `end`, `layer`, `title` |
 
 Header names are matched case-insensitively, and the client lowercases them, so
 `Nation` and `nation` behave identically. `sheet4.end` may be left empty or set
 to `current` for an ongoing period. `sheet4.layer` is `1`–`31`.
 
-The client always asks for `sheet3` and `sheet4`; `getSheet()` resolves those to
-the actual tabs, falling back to `Sheet3`/`시트1` and `Sheet4`/`시트2`. Renaming a
-tab to something else means adding it there.
+The client asks for `sheet3` and `sheet4` in lower case. `getSheetByName()` is
+case-sensitive, so `getSheet()` falls back to a case-insensitive scan to reach
+the `Sheet3` and `Sheet4` tabs. Renaming a tab to something other than those two
+names means updating the client's requests as well.
 
 ## API
 

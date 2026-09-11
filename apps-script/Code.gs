@@ -129,16 +129,21 @@ function constantTimeEquals(a, b) {
 }
 
 /* -------------------- Utility -------------------- */
+/**
+ * The tabs are named Sheet3 and Sheet4; the client asks for sheet3 and sheet4.
+ * getSheetByName() is case-sensitive, so the lookup falls back to a
+ * case-insensitive scan rather than to a hand-written list of spellings.
+ */
 function getSheet(name) {
   const ss = SpreadsheetApp.getActive();
-  let sheet = ss.getSheetByName(name);
+  const sheet = ss.getSheetByName(name);
+  if (sheet) return sheet;
 
-  // Fallback for Korean sheet names if name is 'sheet1'
-  if (!sheet && name === 'sheet3') sheet = ss.getSheetByName('Sheet3') || ss.getSheetByName('시트1');
-  if (!sheet && name === 'sheet4') sheet = ss.getSheetByName('Sheet4') || ss.getSheetByName('시트2');
+  const wanted = String(name).toLowerCase();
+  const match = ss.getSheets().filter(s => s.getName().toLowerCase() === wanted)[0];
 
-  if (!sheet) throw new Error("Sheet not found: " + name);
-  return sheet;
+  if (!match) throw new Error("Sheet not found: " + name);
+  return match;
 }
 
 function successResponse(data) {
