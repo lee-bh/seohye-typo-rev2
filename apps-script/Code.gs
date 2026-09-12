@@ -28,6 +28,7 @@ function doGet(e) {
     const sheetName = e.parameter.sheet || 'sheet3'; // Default to sheet1
     if (action === 'read') return readData(sheetName);
     if (action === 'auth') return authCheck(e.parameter.token);
+    if (action === 'diag') return diagnostics();
     return errorResponse("Invalid GET action");
   } catch (err) {
     return errorResponse(err);
@@ -97,6 +98,42 @@ function setAdminPassword() {
   }
 
   Logger.log("Admin password set. Now empty the quotes in setAdminPassword() and save.");
+}
+
+/**
+ * What the DEPLOYED web app sees: ?action=diag. Answers the one question the
+ * editor cannot — whether the running deployment reads the same script
+ * properties the editor writes. If hasAdminHash is false here while
+ * showAdminDiagnostics() reports true, the URL is serving a different script
+ * project, and the scriptId values will differ.
+ *
+ * Reveals no password, no hash and no spreadsheet. Safe to leave in place;
+ * remove the 'diag' line in doGet() if you would rather it not be public.
+ */
+function diagnostics() {
+  const properties = PropertiesService.getScriptProperties();
+
+  return successResponse({
+    scriptId: ScriptApp.getScriptId(),
+    hasAdminHash: !!properties.getProperty(ADMIN_HASH_PROPERTY),
+    propertyKeys: properties.getKeys(),
+    sheetTabs: SpreadsheetApp.getActive().getSheets().map(s => s.getName())
+  });
+}
+
+/**
+ * The same facts from the editor's side. It throws on purpose: the message
+ * then appears in the execution list, which stays readable even when log
+ * output does not show.
+ */
+function showAdminDiagnostics() {
+  const properties = PropertiesService.getScriptProperties();
+
+  throw new Error(
+    "scriptId=" + ScriptApp.getScriptId() +
+    " | hasAdminHash=" + !!properties.getProperty(ADMIN_HASH_PROPERTY) +
+    " | keys=[" + properties.getKeys().join(", ") + "]" +
+    " | tabs=[" + SpreadsheetApp.getActive().getSheets().map(s => s.getName()).join(", ") + "]");
 }
 
 /**

@@ -82,6 +82,16 @@ run that ends without an error really did store it, and `checkAdminPassword()`
 throws when no password is set. A green run of either means it is configured.
 Until it is, every write is refused with `code: not_configured`.
 
+If the editor reports a password is set but the web app still answers
+`not_configured`, the URL is serving a different script project from the one
+being edited. `?action=diag` reports what the deployment sees — its `scriptId`,
+whether it finds the hash, which property keys exist and which tabs it reaches —
+and `showAdminDiagnostics()` reports the same from the editor, throwing so the
+answer lands in the execution list. Two different `scriptId` values confirm it;
+paste the code into the project the URL actually serves, or redeploy from the
+one being edited and update `API_URL`. Neither reports the password, the hash or
+the spreadsheet.
+
 What this is and is not: it is one shared password giving a real server-side
 gate, and a wrong guess costs a round trip plus a half-second delay. It is not
 an identity system — anyone holding the password, or the hash, can write, and
