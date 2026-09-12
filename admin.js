@@ -13,9 +13,6 @@
 // in a generic rainbow table. Must match PASSWORD_PREFIX in apps-script/Code.gs.
 const PASSWORD_PREFIX = 'seohye-typo:';
 
-// sessionStorage, not localStorage: the token is gone when the tab closes.
-const TOKEN_KEY = 'seohye-typo-admin-token';
-
 // DOM Elements (admin.html only)
 const modalOverlay = document.getElementById('modal-overlay');
 const itemForm = document.getElementById('item-form');
@@ -23,6 +20,10 @@ const loginOverlay = document.getElementById('login-overlay');
 const loginForm = document.getElementById('login-form');
 const loginError = document.getElementById('login-error');
 
+// In memory only. It was kept in sessionStorage so a reload would not ask
+// again, but sessionStorage survives reloads and is copied into any tab opened
+// from this one, so the page let people straight in without a password. The
+// token now lives for exactly as long as the page does.
 let adminToken = null;
 let started = false;
 
@@ -45,8 +46,7 @@ async function hashPassword(password) {
 // and nothing is unlocked until it answers yes.
 async function verifyToken(token) {
     const params = new URLSearchParams({ action: 'auth', token });
-    const response = await fetch(`${API_URL}?${params}`);
-    return response.json();
+    return fetchJson(`${API_URL}?${params}`);
 }
 
 async function attemptLogin(password) {
@@ -58,7 +58,6 @@ async function attemptLogin(password) {
     }
 
     adminToken = token;
-    sessionStorage.setItem(TOKEN_KEY, token);
     start();
 }
 
@@ -75,7 +74,6 @@ function start() {
 // was changed while this tab was open.
 function lock(message) {
     adminToken = null;
-    sessionStorage.removeItem(TOKEN_KEY);
 
     document.body.classList.remove('unlocked');
     loginOverlay.classList.remove('hidden');
@@ -87,7 +85,7 @@ function showLoginError(message) {
     loginError.classList.toggle('hidden', !message);
 }
 
-async function setupLogin() {
+function setupLogin() {
     loginForm.onsubmit = async (e) => {
         e.preventDefault();
         showLoginError('');
@@ -107,27 +105,8 @@ async function setupLogin() {
         }
     };
 
-    document.getElementById('logout-btn').onclick = () => {
-        sessionStorage.removeItem(TOKEN_KEY);
-        location.reload();
-    };
-
-    // A token kept from earlier in this tab still has to be confirmed by the
-    // server before anything is shown.
-    const stored = sessionStorage.getItem(TOKEN_KEY);
-    if (!stored) return;
-
-    try {
-        const result = await verifyToken(stored);
-        if (result.status === 'success') {
-            adminToken = stored;
-            start();
-        } else {
-            sessionStorage.removeItem(TOKEN_KEY);
-        }
-    } catch (error) {
-        console.error('Could not reach the server to verify the stored token:', error);
-    }
+    // Reloading drops the token with the page, which is the whole point.
+    document.getElementById('logout-btn').onclick = () => location.reload();
 }
 
 /* ------------------------------------------------------------- form fields */
@@ -287,8 +266,7 @@ async function postToSheet(action, fields) {
     params.append('action', action);
     params.append('token', adminToken || '');
 
-    const response = await fetch(API_URL, { method: 'POST', body: params });
-    const result = await response.json();
+    const result = await fetchJson(API_URL, { method: 'POST', body: params });
 
     if (result.status !== 'success' && result.code === 'unauthorized') {
         lock('パスワードが変更されました。もう一度入力してください。');

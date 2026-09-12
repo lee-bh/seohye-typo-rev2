@@ -70,16 +70,51 @@ This check has to live here rather than in the page, because the endpoint is
 reachable directly: a password checked in `admin.js` would stop nobody from
 POSTing to the `/exec` URL themselves.
 
-To set it, open `setAdminPassword()` in the editor, replace `CHANGE-ME` with the
-password, run the function once, then clear the literal and save again. The hash
+To set it, open `setAdminPassword()` in the editor and type the password between
+the quotes on the `const password = '';` line — that one line is the only thing
+to edit. Run the function once, then empty the quotes again and save. The hash
 lands in the script property `ADMIN_TOKEN_HASH`; the password is not stored
-anywhere. Until it is set, every write is refused with `code: not_configured`.
+anywhere.
+
+Both functions report through the execution list rather than only the log:
+`setAdminPassword()` reads the hash back and throws if it did not stick, so a
+run that ends without an error really did store it, and `checkAdminPassword()`
+throws when no password is set. A green run of either means it is configured.
+Until it is, every write is refused with `code: not_configured`.
+
+If the editor reports a password is set but the web app still answers
+`not_configured`, the URL is serving a different script project from the one
+being edited. `?action=diag` reports what the deployment sees — its `scriptId`,
+whether it finds the hash, which property keys exist and which tabs it reaches —
+and `showAdminDiagnostics()` reports the same from the editor, throwing so the
+answer lands in the execution list. Two different `scriptId` values confirm it;
+paste the code into the project the URL actually serves, or redeploy from the
+one being edited and update `API_URL`. Neither reports the password, the hash or
+the spreadsheet.
 
 What this is and is not: it is one shared password giving a real server-side
 gate, and a wrong guess costs a round trip plus a half-second delay. It is not
 an identity system — anyone holding the password, or the hash, can write, and
 the log will not say who did. Rotate it when someone should no longer have
 access.
+
+## When a write comes back as HTML
+
+`Unexpected token '<'` in the browser means Apps Script answered with a page
+instead of JSON, which happens when the request never reached the script — an
+authorisation prompt, a sign-in page, or an uncaught error inside the
+deployment. The client now reports the page's own text instead of the parse
+error, which usually names the cause outright.
+
+`testWriteFromEditor()` runs `doPost()` from the editor, where a failure shows
+its real message in the execution list rather than being flattened into an HTML
+page. It performs a real write, so point it at a row you are willing to touch.
+A JSON result there while the browser still fails means the script is fine and
+the problem is the deployment's access or authorisation, not the code.
+
+Adding code that touches a new service changes the scopes the script needs, and
+a deployment authorised under the old set fails this way. Running any function
+once from the editor re-prompts for the new permissions; redeploy afterwards.
 
 ## Deploying
 
@@ -98,5 +133,12 @@ Or paste `Code.gs` into the Apps Script editor by hand, then
 *Who has access: Anyone*. Put the resulting `/exec` URL into `API_URL` at the
 top of `../app.js`.
 
-Re-deploying to the **same** deployment keeps the URL stable; creating a new
-deployment produces a new URL and requires updating `API_URL`.
+Re-deploying to the **same** deployment keeps the URL stable: open
+**Deploy → Manage deployments**, click the pencil on the existing deployment,
+set **Version: New version**, and deploy. **New deployment** instead mints a new
+URL, and `API_URL` in `../app.js` has to be updated to match.
+
+A URL whose deployment has been archived or deleted answers every request —
+GET and POST alike — with Google's "unable to open the file" page rather than
+JSON. The client names that case specifically; the fix is to copy the current
+URL out of Manage deployments.

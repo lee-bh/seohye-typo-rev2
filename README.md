@@ -32,14 +32,16 @@ Two sheets back the view:
 
 ## Editing
 
-`admin.html` asks for a password before it loads anything. The password is
-checked by the Apps Script backend, not by the page: the hash is sent to the
-`auth` action to unlock, kept in `sessionStorage` for that tab, and attached to
-every write. A check in the page's own JavaScript would be decorative, since the
+`admin.html` asks for a password before it loads anything, every time it is
+opened. The password is checked by the Apps Script backend, not by the page:
+the hash is sent to the `auth` action to unlock, held in memory for as long as
+the page lives, and attached to every write. Nothing is written to browser
+storage, so a reload asks again and a tab opened from this one starts locked. A check in the page's own JavaScript would be decorative, since the
 `/exec` endpoint can be posted to directly — so the endpoint is what enforces it,
 and reads stay public for `index.html`.
 
-Set the password with `setAdminPassword()` once in the Apps Script editor; see
+Set the password by typing it into `setAdminPassword()` and running that
+function once in the Apps Script editor; see
 [`apps-script/README.md`](apps-script/README.md#the-admin-password). Until it is
 set, every write is refused.
 

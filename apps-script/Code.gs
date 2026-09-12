@@ -28,6 +28,7 @@ function doGet(e) {
     const sheetName = e.parameter.sheet || 'sheet3'; // Default to sheet1
     if (action === 'read') return readData(sheetName);
     if (action === 'auth') return authCheck(e.parameter.token);
+    if (action === 'diag') return diagnostics();
     return errorResponse("Invalid GET action");
   } catch (err) {
     return errorResponse(err);
@@ -70,20 +71,114 @@ function doPost(e) {
 /* -------------------- Admin password -------------------- */
 
 /**
- * Run this ONCE from the Apps Script editor to set the admin password, then
- * clear the literal below and save again so it is not left in the source.
- * The password itself is never stored — only its hash.
+ * Sets the admin password. Type it between the quotes on the line below, run
+ * this function ONCE from the editor, then empty the quotes again and save so
+ * the password is not left in the source. It is never stored — only its hash.
+ *
+ * There is deliberately only one place to edit: an earlier version compared
+ * against a placeholder spelled out twice, and replacing both — the obvious
+ * reading of "change this" — made the guard match the new password and abort.
  */
 function setAdminPassword() {
-  const password = 'CHANGE-ME';
+  const password = '';
 
-  if (!password || password === 'CHANGE-ME') {
-    throw new Error("Edit the password in setAdminPassword() before running it.");
+  if (!password) {
+    throw new Error("Type the password between the quotes in setAdminPassword(), then run it again.");
   }
-  PropertiesService.getScriptProperties()
-    .setProperty(ADMIN_HASH_PROPERTY, sha256Hex(PASSWORD_PREFIX + password));
 
-  Logger.log("Admin password set. Now clear the literal from setAdminPassword().");
+  const hash = sha256Hex(PASSWORD_PREFIX + password);
+  const properties = PropertiesService.getScriptProperties();
+  properties.setProperty(ADMIN_HASH_PROPERTY, hash);
+
+  // Read it back and fail loudly if it did not stick. Both outcomes are then
+  // visible in the execution list itself -- a run that ends without an error
+  // really has stored the password -- so nothing depends on finding a log line.
+  if (properties.getProperty(ADMIN_HASH_PROPERTY) !== hash) {
+    throw new Error("The hash was not stored. Check that the script can write its properties.");
+  }
+
+  Logger.log("Admin password set. Now empty the quotes in setAdminPassword() and save.");
+}
+
+/**
+ * What the DEPLOYED web app sees: ?action=diag. Answers the one question the
+ * editor cannot — whether the running deployment reads the same script
+ * properties the editor writes. If hasAdminHash is false here while
+ * showAdminDiagnostics() reports true, the URL is serving a different script
+ * project, and the scriptId values will differ.
+ *
+ * Reveals no password, no hash and no spreadsheet. Safe to leave in place;
+ * remove the 'diag' line in doGet() if you would rather it not be public.
+ */
+function diagnostics() {
+  const properties = PropertiesService.getScriptProperties();
+
+  return successResponse({
+    scriptId: ScriptApp.getScriptId(),
+    hasAdminHash: !!properties.getProperty(ADMIN_HASH_PROPERTY),
+    propertyKeys: properties.getKeys(),
+    sheetTabs: SpreadsheetApp.getActive().getSheets().map(s => s.getName())
+  });
+}
+
+/**
+ * The same facts from the editor's side. It throws on purpose: the message
+ * then appears in the execution list, which stays readable even when log
+ * output does not show.
+ */
+function showAdminDiagnostics() {
+  const properties = PropertiesService.getScriptProperties();
+
+  throw new Error(
+    "scriptId=" + ScriptApp.getScriptId() +
+    " | hasAdminHash=" + !!properties.getProperty(ADMIN_HASH_PROPERTY) +
+    " | keys=[" + properties.getKeys().join(", ") + "]" +
+    " | tabs=[" + SpreadsheetApp.getActive().getSheets().map(s => s.getName()).join(", ") + "]");
+}
+
+/**
+ * Exercises the real write path from the editor, where a failure shows its own
+ * message in the execution list. The browser only ever sees Apps Script's HTML
+ * error page for the same failure, which arrives as "Unexpected token '<'".
+ *
+ * The write is a no-op: it reads Sheet4 row 2's current layer and sends that
+ * same value back, so the sheet is unchanged whether it succeeds or fails. It
+ * throws on purpose, to print what doPost() returned.
+ */
+function testWriteFromEditor() {
+  const token = PropertiesService.getScriptProperties().getProperty(ADMIN_HASH_PROPERTY);
+  const sheet = getSheet('sheet4');
+  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0]
+    .map(h => String(h).trim().toLowerCase());
+
+  const layerColumn = headers.indexOf('layer') + 1;
+  if (!layerColumn) throw new Error("Sheet4 has no 'layer' column: [" + headers.join(", ") + "]");
+
+  const currentLayer = sheet.getRange(2, layerColumn).getValue();
+
+  const output = doPost({
+    parameter: {
+      action: 'update', sheet: 'sheet4', _row: '2',
+      layer: String(currentLayer), token: token
+    }
+  });
+
+  throw new Error("doPost returned: " + output.getContent());
+}
+
+/**
+ * Run this to check whether a password is set, without revealing it. It throws
+ * when none is, so the answer shows in the execution list as failed or
+ * completed even if the log output is not visible.
+ */
+function checkAdminPassword() {
+  const hash = PropertiesService.getScriptProperties().getProperty(ADMIN_HASH_PROPERTY);
+
+  if (!hash) {
+    throw new Error("Admin password is NOT configured. Run setAdminPassword().");
+  }
+
+  Logger.log("Admin password IS configured (hash ends in " + hash.slice(-6) + ").");
 }
 
 /** Confirms a token without writing anything — admin.js's login screen. */
