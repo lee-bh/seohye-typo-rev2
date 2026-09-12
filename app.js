@@ -104,7 +104,9 @@ function describeNonJsonResponse(response, text) {
     const plain = text.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
 
     let hint;
-    if (/authoriz|permission|権限|승인|권한/i.test(plain)) {
+    if (/unable to open the file|ファイルを開けません|파일을 열 수 없습니다/i.test(plain)) {
+        hint = 'この配置 URL は無効です。Apps Script の「デプロイを管理」で現在の /exec URL を確認し、app.js の API_URL を差し替えてください。';
+    } else if (/authoriz|permission|権限|승인|권한/i.test(plain)) {
         hint = 'デプロイが承認されていません。エディタで関数を一度実行して権限を許可し、再デプロイしてください。';
     } else if (/sign in|signin|accounts\.google|ログイン|로그인/i.test(plain)) {
         hint = 'Google がログインを求めています。デプロイのアクセス権を「全員」にしてください。';

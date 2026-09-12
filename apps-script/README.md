@@ -133,5 +133,12 @@ Or paste `Code.gs` into the Apps Script editor by hand, then
 *Who has access: Anyone*. Put the resulting `/exec` URL into `API_URL` at the
 top of `../app.js`.
 
-Re-deploying to the **same** deployment keeps the URL stable; creating a new
-deployment produces a new URL and requires updating `API_URL`.
+Re-deploying to the **same** deployment keeps the URL stable: open
+**Deploy → Manage deployments**, click the pencil on the existing deployment,
+set **Version: New version**, and deploy. **New deployment** instead mints a new
+URL, and `API_URL` in `../app.js` has to be updated to match.
+
+A URL whose deployment has been archived or deleted answers every request —
+GET and POST alike — with Google's "unable to open the file" page rather than
+JSON. The client names that case specifically; the fix is to copy the current
+URL out of Manage deployments.
