@@ -137,19 +137,30 @@ function showAdminDiagnostics() {
 }
 
 /**
- * Exercises doPost() from the editor, where a failure shows its real message in
- * the execution list. The browser only ever sees Apps Script's HTML error page
- * for the same failure, which arrives as "Unexpected token '<'".
+ * Exercises the real write path from the editor, where a failure shows its own
+ * message in the execution list. The browser only ever sees Apps Script's HTML
+ * error page for the same failure, which arrives as "Unexpected token '<'".
  *
- * It writes: this sets Sheet4 row 2 back to the layer it already has, so point
- * it at a row you are willing to touch. It throws on purpose, to print what
- * doPost() returned.
+ * The write is a no-op: it reads Sheet4 row 2's current layer and sends that
+ * same value back, so the sheet is unchanged whether it succeeds or fails. It
+ * throws on purpose, to print what doPost() returned.
  */
 function testWriteFromEditor() {
   const token = PropertiesService.getScriptProperties().getProperty(ADMIN_HASH_PROPERTY);
+  const sheet = getSheet('sheet4');
+  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0]
+    .map(h => String(h).trim().toLowerCase());
+
+  const layerColumn = headers.indexOf('layer') + 1;
+  if (!layerColumn) throw new Error("Sheet4 has no 'layer' column: [" + headers.join(", ") + "]");
+
+  const currentLayer = sheet.getRange(2, layerColumn).getValue();
 
   const output = doPost({
-    parameter: { action: 'update', sheet: 'sheet4', _row: '2', layer: '1', token: token }
+    parameter: {
+      action: 'update', sheet: 'sheet4', _row: '2',
+      layer: String(currentLayer), token: token
+    }
   });
 
   throw new Error("doPost returned: " + output.getContent());
