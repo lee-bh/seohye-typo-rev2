@@ -84,19 +84,34 @@ function setAdminPassword() {
   if (!password) {
     throw new Error("Type the password between the quotes in setAdminPassword(), then run it again.");
   }
-  PropertiesService.getScriptProperties()
-    .setProperty(ADMIN_HASH_PROPERTY, sha256Hex(PASSWORD_PREFIX + password));
+
+  const hash = sha256Hex(PASSWORD_PREFIX + password);
+  const properties = PropertiesService.getScriptProperties();
+  properties.setProperty(ADMIN_HASH_PROPERTY, hash);
+
+  // Read it back and fail loudly if it did not stick. Both outcomes are then
+  // visible in the execution list itself -- a run that ends without an error
+  // really has stored the password -- so nothing depends on finding a log line.
+  if (properties.getProperty(ADMIN_HASH_PROPERTY) !== hash) {
+    throw new Error("The hash was not stored. Check that the script can write its properties.");
+  }
 
   Logger.log("Admin password set. Now empty the quotes in setAdminPassword() and save.");
 }
 
-/** Run this to see whether a password is set. It does not reveal the password. */
+/**
+ * Run this to check whether a password is set, without revealing it. It throws
+ * when none is, so the answer shows in the execution list as failed or
+ * completed even if the log output is not visible.
+ */
 function checkAdminPassword() {
   const hash = PropertiesService.getScriptProperties().getProperty(ADMIN_HASH_PROPERTY);
 
-  Logger.log(hash
-    ? "Admin password IS configured (hash ends in " + hash.slice(-6) + ")."
-    : "Admin password is NOT configured. Run setAdminPassword().");
+  if (!hash) {
+    throw new Error("Admin password is NOT configured. Run setAdminPassword().");
+  }
+
+  Logger.log("Admin password IS configured (hash ends in " + hash.slice(-6) + ").");
 }
 
 /** Confirms a token without writing anything — admin.js's login screen. */

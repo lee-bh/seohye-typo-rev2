@@ -74,8 +74,13 @@ To set it, open `setAdminPassword()` in the editor and type the password between
 the quotes on the `const password = '';` line — that one line is the only thing
 to edit. Run the function once, then empty the quotes again and save. The hash
 lands in the script property `ADMIN_TOKEN_HASH`; the password is not stored
-anywhere. Run `checkAdminPassword()` to confirm it took; until it is set, every
-write is refused with `code: not_configured`.
+anywhere.
+
+Both functions report through the execution list rather than only the log:
+`setAdminPassword()` reads the hash back and throws if it did not stick, so a
+run that ends without an error really did store it, and `checkAdminPassword()`
+throws when no password is set. A green run of either means it is configured.
+Until it is, every write is refused with `code: not_configured`.
 
 What this is and is not: it is one shared password giving a real server-side
 gate, and a wrong guess costs a round trip plus a half-second delay. It is not
