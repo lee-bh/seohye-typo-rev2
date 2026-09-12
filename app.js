@@ -51,9 +51,8 @@ const LAYER_HEIGHT = 40; // vertical distance between two layers
 const LAYER_TOP_MARGIN = 80; // top of the content to layer 1's label
 const LABEL_LINE_GAP = 20; // a label sits this far above its period line
 const CLICK_SLOP = 5; // pointer travel still counted as a click, in px
-const ITEM_WIDTH = 320; // sheet3 card width, mirrored into CSS as --item-width
-const ITEM_GAP = 8; // minimum horizontal space between two cards in a row
-const ITEM_ROW_HEIGHT = 40; // vertical distance between two packed rows
+const ITEM_WIDTH = 800; // sheet3 card width, mirrored into CSS as --item-width
+const ITEM_ROW_HEIGHT = 45; // vertical distance between two cards
 const MIN_SCALE = 0.5;
 const MAX_SCALE = 10;
 const DEFAULT_SCALE = 4;
@@ -344,13 +343,11 @@ function renderSheet3(pixelsPerYear) {
     // Sort items by year
     const sortedItems = [...state.items].sort((a, b) => (parseInt(a.yr) || 0) - (parseInt(b.yr) || 0));
 
-    // Pack the sorted cards into rows: each one drops into the first row whose
-    // previous card has already ended before this card starts. Stacking by array
-    // index instead gave every card a row of its own, a diagonal staircase
-    // 45px * n tall in which nothing about a period's density was readable.
-    const rowEnds = [];
-
-    sortedItems.forEach(item => {
+    // One card per row, in year order, so the chronology reads as a single line
+    // descending to the right. Packing them into shared rows fitted far more on
+    // screen, but once a row's previous card had ended the sequence jumped back
+    // up to reuse it, and the reading order stopped being top to bottom.
+    sortedItems.forEach((item, index) => {
         const el = document.createElement('div');
         el.className = 'timeline-item';
 
@@ -362,12 +359,7 @@ function renderSheet3(pixelsPerYear) {
         if (isNaN(year)) year = state.minYear;
 
         const x = (year - state.minYear) * pixelsPerYear;
-
-        let row = rowEnds.findIndex(end => end <= x);
-        if (row === -1) row = rowEnds.length;
-        rowEnds[row] = x + ITEM_WIDTH + ITEM_GAP;
-
-        const y = topOffset + row * ITEM_ROW_HEIGHT;
+        const y = topOffset + index * ITEM_ROW_HEIGHT;
 
         el.style.left = `${x}px`;
         el.style.top = `${y}px`;

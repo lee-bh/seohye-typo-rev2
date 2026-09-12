@@ -24,7 +24,8 @@ at all.
 Two sheets back the view:
 
 - **`Sheet3`** — point events (`nation`, `category`, `yr`, `item`, `info`,
-  `link`, `cite`), drawn as cards below the axis.
+  `link`, `cite`), drawn as cards below the axis, one per row in year order so
+  the chronology descends as a single line.
 - **`Sheet4`** — periods (`country`, `theme`, `begin`, `end`, `layer`,
   `title`), drawn as horizontal bars across 31 stacked layers. `end` may be
   empty or `current` for an ongoing period; `layer` is `1`–`31` and can be
