@@ -137,6 +137,25 @@ function showAdminDiagnostics() {
 }
 
 /**
+ * Exercises doPost() from the editor, where a failure shows its real message in
+ * the execution list. The browser only ever sees Apps Script's HTML error page
+ * for the same failure, which arrives as "Unexpected token '<'".
+ *
+ * It writes: this sets Sheet4 row 2 back to the layer it already has, so point
+ * it at a row you are willing to touch. It throws on purpose, to print what
+ * doPost() returned.
+ */
+function testWriteFromEditor() {
+  const token = PropertiesService.getScriptProperties().getProperty(ADMIN_HASH_PROPERTY);
+
+  const output = doPost({
+    parameter: { action: 'update', sheet: 'sheet4', _row: '2', layer: '1', token: token }
+  });
+
+  throw new Error("doPost returned: " + output.getContent());
+}
+
+/**
  * Run this to check whether a password is set, without revealing it. It throws
  * when none is, so the answer shows in the execution list as failed or
  * completed even if the log output is not visible.

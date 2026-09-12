@@ -98,6 +98,24 @@ an identity system — anyone holding the password, or the hash, can write, and
 the log will not say who did. Rotate it when someone should no longer have
 access.
 
+## When a write comes back as HTML
+
+`Unexpected token '<'` in the browser means Apps Script answered with a page
+instead of JSON, which happens when the request never reached the script — an
+authorisation prompt, a sign-in page, or an uncaught error inside the
+deployment. The client now reports the page's own text instead of the parse
+error, which usually names the cause outright.
+
+`testWriteFromEditor()` runs `doPost()` from the editor, where a failure shows
+its real message in the execution list rather than being flattened into an HTML
+page. It performs a real write, so point it at a row you are willing to touch.
+A JSON result there while the browser still fails means the script is fine and
+the problem is the deployment's access or authorisation, not the code.
+
+Adding code that touches a new service changes the scopes the script needs, and
+a deployment authorised under the old set fails this way. Running any function
+once from the editor re-prompts for the new permissions; redeploy afterwards.
+
 ## Deploying
 
 With [clasp](https://github.com/google/clasp):

@@ -85,6 +85,36 @@ function escapeHtml(value) {
     })[ch]);
 }
 
+// Apps Script answers with an HTML page, not JSON, whenever a request does not
+// reach the script itself: an authorisation prompt, a sign-in page, or an
+// uncaught error inside the deployment. Parsing that as JSON only ever produced
+// "Unexpected token '<'", which says nothing about which of those happened.
+async function fetchJson(url, options) {
+    const response = await fetch(url, options);
+    const text = await response.text();
+
+    try {
+        return JSON.parse(text);
+    } catch (error) {
+        throw new Error(describeNonJsonResponse(response, text));
+    }
+}
+
+function describeNonJsonResponse(response, text) {
+    const plain = text.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+
+    let hint;
+    if (/authoriz|permission|権限|승인|권한/i.test(plain)) {
+        hint = 'デプロイが承認されていません。エディタで関数を一度実行して権限を許可し、再デプロイしてください。';
+    } else if (/sign in|signin|accounts\.google|ログイン|로그인/i.test(plain)) {
+        hint = 'Google がログインを求めています。デプロイのアクセス権を「全員」にしてください。';
+    } else {
+        hint = 'サーバーが JSON ではなくページを返しました。';
+    }
+
+    return `${hint} (HTTP ${response.status}) ${plain.slice(0, 300)}`;
+}
+
 // One year in pixels at the current zoom. Derived in three places before, which
 // is one divergence away from items and grid lines disagreeing on where a year
 // sits.
@@ -106,12 +136,10 @@ async function loadData() {
     showLoading(true);
     try {
         // Fetch Sheet3
-        const res1 = await fetch(`${API_URL}?action=read&sheet=sheet3`);
-        const json1 = await res1.json();
+        const json1 = await fetchJson(`${API_URL}?action=read&sheet=sheet3`);
 
         // Fetch Sheet4
-        const res2 = await fetch(`${API_URL}?action=read&sheet=sheet4`);
-        const json2 = await res2.json();
+        const json2 = await fetchJson(`${API_URL}?action=read&sheet=sheet4`);
 
         if (json1.status === 'success' && json2.status === 'success') {
             state.items = parseRows(json1.data.headers, json1.data.rows, json1.data.rowNumbers);

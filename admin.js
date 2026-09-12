@@ -45,8 +45,7 @@ async function hashPassword(password) {
 // and nothing is unlocked until it answers yes.
 async function verifyToken(token) {
     const params = new URLSearchParams({ action: 'auth', token });
-    const response = await fetch(`${API_URL}?${params}`);
-    return response.json();
+    return fetchJson(`${API_URL}?${params}`);
 }
 
 async function attemptLogin(password) {
@@ -287,8 +286,7 @@ async function postToSheet(action, fields) {
     params.append('action', action);
     params.append('token', adminToken || '');
 
-    const response = await fetch(API_URL, { method: 'POST', body: params });
-    const result = await response.json();
+    const result = await fetchJson(API_URL, { method: 'POST', body: params });
 
     if (result.status !== 'success' && result.code === 'unauthorized') {
         lock('パスワードが変更されました。もう一度入力してください。');
