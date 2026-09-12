@@ -24,7 +24,8 @@ at all.
 Two sheets back the view:
 
 - **`Sheet3`** — point events (`nation`, `category`, `yr`, `item`, `info`,
-  `link`, `cite`), drawn as cards below the axis.
+  `link`, `cite`), drawn as cards below the axis, one per row in year order so
+  the chronology descends as a single line.
 - **`Sheet4`** — periods (`country`, `theme`, `begin`, `end`, `layer`,
   `title`), drawn as horizontal bars across 31 stacked layers. `end` may be
   empty or `current` for an ongoing period; `layer` is `1`–`31` and can be
@@ -53,6 +54,11 @@ events drive all of it, so mouse, touch and pen behave the same.
 In `admin.html` only: clicking a card or a period label opens its editor, and
 dragging a period label up or down moves it between layers, writing straight
 back to the sheet.
+
+A write sends one request and then applies the change to the records already on
+screen, rather than re-reading both sheets each time. **再取得** pulls the sheets
+again — worth using if someone else may be editing at the same time, since the
+page will not notice their changes on its own.
 
 ## Running locally
 

@@ -19,14 +19,17 @@ const ADMIN_HASH_PROPERTY = 'ADMIN_TOKEN_HASH';
 const PASSWORD_PREFIX = 'seohye-typo:';
 
 // Request parameters that carry routing information rather than cell values.
-const RESERVED_PARAMS = ['action', 'sheet', '_row', 'token', 'callback'];
+const RESERVED_PARAMS = ['action', 'sheet', 'sheets', '_row', 'token', 'callback'];
 
 /* -------------------- Entry Points -------------------- */
 function doGet(e) {
   try {
     const action = e.parameter.action;
     const sheetName = e.parameter.sheet || 'sheet3'; // Default to sheet1
-    if (action === 'read') return readData(sheetName);
+    if (action === 'read') {
+      // One round trip for both sheets; ?sheet= still serves one at a time.
+      return e.parameter.sheets ? readMany(e.parameter.sheets) : readData(sheetName);
+    }
     if (action === 'auth') return authCheck(e.parameter.token);
     if (action === 'diag') return diagnostics();
     return errorResponse("Invalid GET action");
@@ -291,12 +294,30 @@ function normalizeCell(value) {
 
 /* -------------------- CRUD Functions (Updated) -------------------- */
 function readData(sheetName) {
-  const sheet = getSheet(sheetName);
+  return successResponse(collectRows(getSheet(sheetName)));
+}
+
+/**
+ * Several sheets in one request. Every web app invocation carries its own
+ * start-up cost, so asking for sheet3 and sheet4 separately spent most of the
+ * page's loading time paying that cost twice.
+ */
+function readMany(list) {
+  const names = String(list).split(',').map(n => n.trim()).filter(n => n);
+  if (!names.length) return errorResponse("No sheets requested");
+
+  const sheets = {};
+  names.forEach(name => { sheets[name] = collectRows(getSheet(name)); });
+
+  return successResponse({ sheets: sheets });
+}
+
+function collectRows(sheet) {
   const lastRow = sheet.getLastRow();
   const lastCol = sheet.getLastColumn();
 
   if (lastRow < 1 || lastCol < 1) {
-    return successResponse({ headers: [], rows: [], rowNumbers: [] });
+    return { headers: [], rows: [], rowNumbers: [] };
   }
 
   const headers = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
@@ -315,7 +336,7 @@ function readData(sheetName) {
     rowNumbers.push(i + 2);
   });
 
-  return successResponse({ headers, rows, rowNumbers });
+  return { headers: headers, rows: rows, rowNumbers: rowNumbers };
 }
 
 function createData(body, sheetName) {
@@ -328,8 +349,10 @@ function createData(body, sheetName) {
     return value === undefined ? "" : value;
   });
 
+  // Report the row that was written so the client can place the new record
+  // itself instead of re-reading both sheets to find it.
   sheet.appendRow(newRow);
-  return successResponse("Row added to " + sheetName);
+  return successResponse({ message: "Row added to " + sheetName, _row: sheet.getLastRow() });
 }
 
 function updateData(body, sheetName) {

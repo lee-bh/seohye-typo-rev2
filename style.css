@@ -7,8 +7,8 @@
        borderless and transparent while these were undefined. */
     --card-bg: #1a1a20;
     --glass-border: rgba(255, 255, 255, 0.15);
-    /* Kept in sync with ITEM_WIDTH in app.js, which packs the cards into rows. */
-    --item-width: 320px;
+    /* Kept in sync with ITEM_WIDTH in app.js. */
+    --item-width: 800px;
     --font-main: 'Outfit', sans-serif;
     --font-kr: 'Noto Sans KR', sans-serif;
 }
@@ -83,10 +83,15 @@ a.icon-btn {
     font-size: 0.8rem;
 }
 
+/* A pill rather than a fixed circle: at 36px wide a three-character label such
+   as 再取得 spilled out of the button. Two-character labels still come out
+   round, since the minimum width matches the height. */
 .icon-btn {
-    width: 36px;
+    min-width: 36px;
     height: 36px;
-    border-radius: 50%;
+    padding: 0 10px;
+    border-radius: 18px;
+    white-space: nowrap;
     background: rgba(255, 255, 255, 0.1);
     color: white;
     display: flex;
@@ -167,8 +172,8 @@ a.icon-btn {
     background: rgba(255, 255, 255, 0.05);
 }
 
-/* Cards sit shoulder to shoulder once they are packed into rows, so a resting
-   card is one clipped line and only the hovered one opens up. */
+/* Cards are 45px apart, so a resting card stays on one clipped line and only
+   the hovered one opens up over its neighbours. */
 .timeline-item:hover {
     transform: translateY(-5px);
     box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
@@ -179,7 +184,7 @@ a.icon-btn {
     overflow: visible;
     width: auto;
     min-width: var(--item-width);
-    max-width: 560px;
+    max-width: 1000px;
     padding-bottom: 6px;
 }
 

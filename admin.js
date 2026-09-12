@@ -241,6 +241,7 @@ function setupForm() {
 
     document.getElementById('add-item-btn').onclick = () => openEditModal(null);
     document.getElementById('add-sheet4-btn').onclick = () => openSheet4Modal(null);
+    document.getElementById('reload-btn').onclick = () => loadData();
 
     const submitHandler = (form) => async (e) => {
         e.preventDefault();
@@ -279,18 +280,75 @@ async function postToSheet(action, fields) {
     return result;
 }
 
+/* Writes report what they changed, so the page applies the change to the
+   records it already holds rather than re-reading both sheets. Re-reading cost
+   another round trip after every drag, save and delete -- the pause that made
+   editing feel heavy. Use 再取得 to pull the sheets again, which is also what
+   to do if someone else is editing at the same time. */
+
 async function updateItemLayer(row, newLayer) {
     showLoading(true);
     try {
         await postToSheet('update', { sheet: 'sheet4', _row: row, layer: newLayer });
-        await loadData(); // Reload for accuracy
+        // app.js has already set the item's layer; redraw where the sheet agrees.
+        renderTimeline();
     } catch (error) {
         console.error('Update error:', error);
         alert(error.message);
-        renderTimeline(); // Put the dragged label back where the sheet says it is
+        await loadData(); // Put the dragged label back where the sheet says it is
     } finally {
         showLoading(false);
     }
+}
+
+function sheetItems(sheetName) {
+    return sheetName === 'sheet4' ? state.sheet4Items : state.items;
+}
+
+// The submitted fields, minus the ones that route the request.
+function recordFields(data) {
+    const fields = {};
+    Object.keys(data).forEach(key => {
+        if (['action', 'sheet', '_row', 'token'].indexOf(key) === -1) fields[key] = data[key];
+    });
+    return fields;
+}
+
+function applyLocalWrite(action, data, result) {
+    const sheetName = data.sheet === 'sheet4' ? 'sheet4' : 'sheet3';
+    const items = sheetItems(sheetName);
+
+    if (action === 'create') {
+        const row = parseInt(result && result.data && result.data._row, 10);
+        if (!row) return false; // deployment predates the reported row number
+        items.push(Object.assign(recordFields(data), { _row: row }));
+        return true;
+    }
+
+    const row = parseInt(data._row, 10);
+    const item = items.find(i => i._row === row);
+    if (!item) return false;
+
+    Object.assign(item, recordFields(data));
+    return true;
+}
+
+function applyLocalDelete(sheetName, row) {
+    const items = sheetItems(sheetName);
+    const index = items.findIndex(i => i._row === row);
+    if (index !== -1) items.splice(index, 1);
+
+    // Deleting a row closes the gap in the sheet, so every record below it
+    // moves up one. Leaving the old numbers would edit the wrong record next.
+    items.forEach(item => {
+        if (item._row > row) item._row -= 1;
+    });
+}
+
+function redrawAfterWrite() {
+    syncSelectOptions();
+    calculateBounds();
+    renderTimeline();
 }
 
 async function sendData(action, data) {
@@ -298,11 +356,13 @@ async function sendData(action, data) {
     closeModals();
 
     try {
-        await postToSheet(action, data);
+        const result = await postToSheet(action, data);
 
-        // Mark the record so it stands out in the timeline after the reload
+        // Mark the record so it stands out in the timeline
         state.modifiedSignatures.add(getSignature(data));
-        await loadData();
+
+        if (applyLocalWrite(action, data, result)) redrawAfterWrite();
+        else await loadData();
     } catch (error) {
         console.error('Save error:', error);
         alert(error.message);
@@ -319,7 +379,9 @@ async function deleteItem(row, sheetName = 'sheet3') {
 
     try {
         await postToSheet('delete', { sheet: sheetName, _row: row });
-        await loadData();
+
+        applyLocalDelete(sheetName, parseInt(row, 10));
+        redrawAfterWrite();
     } catch (error) {
         console.error('Delete error:', error);
         alert(error.message);

@@ -51,9 +51,8 @@ const LAYER_HEIGHT = 40; // vertical distance between two layers
 const LAYER_TOP_MARGIN = 80; // top of the content to layer 1's label
 const LABEL_LINE_GAP = 20; // a label sits this far above its period line
 const CLICK_SLOP = 5; // pointer travel still counted as a click, in px
-const ITEM_WIDTH = 320; // sheet3 card width, mirrored into CSS as --item-width
-const ITEM_GAP = 8; // minimum horizontal space between two cards in a row
-const ITEM_ROW_HEIGHT = 40; // vertical distance between two packed rows
+const ITEM_WIDTH = 800; // sheet3 card width, mirrored into CSS as --item-width
+const ITEM_ROW_HEIGHT = 45; // vertical distance between two cards
 const MIN_SCALE = 0.5;
 const MAX_SCALE = 10;
 const DEFAULT_SCALE = 4;
@@ -137,26 +136,14 @@ async function init() {
 async function loadData() {
     showLoading(true);
     try {
-        // Fetch Sheet3
-        const json1 = await fetchJson(`${API_URL}?action=read&sheet=sheet3`);
+        const [sheet3, sheet4] = await readSheets();
 
-        // Fetch Sheet4
-        const json2 = await fetchJson(`${API_URL}?action=read&sheet=sheet4`);
+        state.items = parseRows(sheet3.headers, sheet3.rows, sheet3.rowNumbers);
+        state.sheet4Items = parseRows(sheet4.headers, sheet4.rows, sheet4.rowNumbers);
 
-        if (json1.status === 'success' && json2.status === 'success') {
-            state.items = parseRows(json1.data.headers, json1.data.rows, json1.data.rowNumbers);
-            state.sheet4Items = parseRows(json2.data.headers, json2.data.rows, json2.data.rowNumbers);
-
-            console.log('Sheet3 items:', state.items);
-            console.log('Sheet4 items:', state.sheet4Items);
-
-            if (editHooks.onDataLoaded) editHooks.onDataLoaded();
-            calculateBounds();
-            renderTimeline();
-        } else {
-            console.error('Error loading data:', json1.message || json2.message);
-            alert('Failed to load data. Please check console.');
-        }
+        if (editHooks.onDataLoaded) editHooks.onDataLoaded();
+        calculateBounds();
+        renderTimeline();
     } catch (error) {
         console.error('Fetch error:', error);
         console.warn('Using mock data due to fetch error');
@@ -165,6 +152,33 @@ async function loadData() {
         showLoading(false);
     }
 }
+
+// Both sheets in one request. Each web app call pays its own start-up cost, so
+// two sequential reads were most of the time spent loading the page.
+// Deployments that predate the combined read ignore ?sheets= and answer with
+// sheet3 alone, which is what the missing `sheets` key detects; those fall back
+// to two reads issued together rather than one after the other.
+async function readSheets() {
+    const combined = await fetchJson(`${API_URL}?action=read&sheets=sheet3,sheet4`);
+
+    if (combined.status === 'success' && combined.data && combined.data.sheets) {
+        const { sheet3, sheet4 } = combined.data.sheets;
+        if (sheet3 && sheet4) return [sheet3, sheet4];
+    }
+
+    console.warn('The deployment predates ?sheets=; falling back to two reads.');
+
+    const [one, two] = await Promise.all([
+        fetchJson(`${API_URL}?action=read&sheet=sheet3`),
+        fetchJson(`${API_URL}?action=read&sheet=sheet4`)
+    ]);
+
+    if (one.status !== 'success' || two.status !== 'success') {
+        throw new Error(one.message || two.message || 'Failed to read the sheets.');
+    }
+    return [one.data, two.data];
+}
+
 
 function parseRows(headers, rows, rowNumbers) {
     return rows.map((row, index) => {
@@ -329,13 +343,11 @@ function renderSheet3(pixelsPerYear) {
     // Sort items by year
     const sortedItems = [...state.items].sort((a, b) => (parseInt(a.yr) || 0) - (parseInt(b.yr) || 0));
 
-    // Pack the sorted cards into rows: each one drops into the first row whose
-    // previous card has already ended before this card starts. Stacking by array
-    // index instead gave every card a row of its own, a diagonal staircase
-    // 45px * n tall in which nothing about a period's density was readable.
-    const rowEnds = [];
-
-    sortedItems.forEach(item => {
+    // One card per row, in year order, so the chronology reads as a single line
+    // descending to the right. Packing them into shared rows fitted far more on
+    // screen, but once a row's previous card had ended the sequence jumped back
+    // up to reuse it, and the reading order stopped being top to bottom.
+    sortedItems.forEach((item, index) => {
         const el = document.createElement('div');
         el.className = 'timeline-item';
 
@@ -347,12 +359,7 @@ function renderSheet3(pixelsPerYear) {
         if (isNaN(year)) year = state.minYear;
 
         const x = (year - state.minYear) * pixelsPerYear;
-
-        let row = rowEnds.findIndex(end => end <= x);
-        if (row === -1) row = rowEnds.length;
-        rowEnds[row] = x + ITEM_WIDTH + ITEM_GAP;
-
-        const y = topOffset + row * ITEM_ROW_HEIGHT;
+        const y = topOffset + index * ITEM_ROW_HEIGHT;
 
         el.style.left = `${x}px`;
         el.style.top = `${y}px`;
