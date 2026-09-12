@@ -37,7 +37,8 @@ All endpoints accept GET or POST. POST bodies must be
 | Action | Parameters | Response |
 | --- | --- | --- |
 | `read` | `sheet` | `{ status, data: { headers, rows, rowNumbers } }` |
-| `create` | `token`, `sheet`, one parameter per column | `{ status, data }` |
+| `read` | `sheets` (comma separated) | `{ status, data: { sheets: { <name>: { headers, rows, rowNumbers } } } }` |
+| `create` | `token`, `sheet`, one parameter per column | `{ status, data: { message, _row } }` |
 | `update` | `token`, `sheet`, `_row`, the columns to change | `{ status, data }` |
 | `delete` | `token`, `sheet`, `_row` | `{ status, data }` |
 | `auth` | `token` | `{ status }` |
@@ -50,6 +51,17 @@ skipped. The client uses it for edits and deletes instead of inferring row
 numbers from the array index, which silently targeted the wrong record for
 everything below a blank row. Clients that predate `rowNumbers` still work —
 they fall back to the index-based guess.
+
+`sheets` answers for several tabs at once. Every web app invocation carries its
+own start-up cost, so reading sheet3 and sheet4 separately paid that cost twice
+and was most of the page's loading time. A client that asks a deployment
+predating `sheets` gets sheet3 alone; the missing `sheets` key is what tells it
+to fall back, and it then issues the two reads together rather than one after
+the other.
+
+`create` reports `_row`, the row it appended to, so the page can place the new
+record among the ones it already holds instead of re-reading both sheets to
+find it.
 
 `update` is a partial write: only the columns present in the request are
 touched, so dragging a `sheet4` label to a new layer sends `layer` alone

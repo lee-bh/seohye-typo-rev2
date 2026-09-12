@@ -83,10 +83,15 @@ a.icon-btn {
     font-size: 0.8rem;
 }
 
+/* A pill rather than a fixed circle: at 36px wide a three-character label such
+   as 再取得 spilled out of the button. Two-character labels still come out
+   round, since the minimum width matches the height. */
 .icon-btn {
-    width: 36px;
+    min-width: 36px;
     height: 36px;
-    border-radius: 50%;
+    padding: 0 10px;
+    border-radius: 18px;
+    white-space: nowrap;
     background: rgba(255, 255, 255, 0.1);
     color: white;
     display: flex;

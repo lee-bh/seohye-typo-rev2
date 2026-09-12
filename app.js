@@ -137,26 +137,14 @@ async function init() {
 async function loadData() {
     showLoading(true);
     try {
-        // Fetch Sheet3
-        const json1 = await fetchJson(`${API_URL}?action=read&sheet=sheet3`);
+        const [sheet3, sheet4] = await readSheets();
 
-        // Fetch Sheet4
-        const json2 = await fetchJson(`${API_URL}?action=read&sheet=sheet4`);
+        state.items = parseRows(sheet3.headers, sheet3.rows, sheet3.rowNumbers);
+        state.sheet4Items = parseRows(sheet4.headers, sheet4.rows, sheet4.rowNumbers);
 
-        if (json1.status === 'success' && json2.status === 'success') {
-            state.items = parseRows(json1.data.headers, json1.data.rows, json1.data.rowNumbers);
-            state.sheet4Items = parseRows(json2.data.headers, json2.data.rows, json2.data.rowNumbers);
-
-            console.log('Sheet3 items:', state.items);
-            console.log('Sheet4 items:', state.sheet4Items);
-
-            if (editHooks.onDataLoaded) editHooks.onDataLoaded();
-            calculateBounds();
-            renderTimeline();
-        } else {
-            console.error('Error loading data:', json1.message || json2.message);
-            alert('Failed to load data. Please check console.');
-        }
+        if (editHooks.onDataLoaded) editHooks.onDataLoaded();
+        calculateBounds();
+        renderTimeline();
     } catch (error) {
         console.error('Fetch error:', error);
         console.warn('Using mock data due to fetch error');
@@ -165,6 +153,33 @@ async function loadData() {
         showLoading(false);
     }
 }
+
+// Both sheets in one request. Each web app call pays its own start-up cost, so
+// two sequential reads were most of the time spent loading the page.
+// Deployments that predate the combined read ignore ?sheets= and answer with
+// sheet3 alone, which is what the missing `sheets` key detects; those fall back
+// to two reads issued together rather than one after the other.
+async function readSheets() {
+    const combined = await fetchJson(`${API_URL}?action=read&sheets=sheet3,sheet4`);
+
+    if (combined.status === 'success' && combined.data && combined.data.sheets) {
+        const { sheet3, sheet4 } = combined.data.sheets;
+        if (sheet3 && sheet4) return [sheet3, sheet4];
+    }
+
+    console.warn('The deployment predates ?sheets=; falling back to two reads.');
+
+    const [one, two] = await Promise.all([
+        fetchJson(`${API_URL}?action=read&sheet=sheet3`),
+        fetchJson(`${API_URL}?action=read&sheet=sheet4`)
+    ]);
+
+    if (one.status !== 'success' || two.status !== 'success') {
+        throw new Error(one.message || two.message || 'Failed to read the sheets.');
+    }
+    return [one.data, two.data];
+}
+
 
 function parseRows(headers, rows, rowNumbers) {
     return rows.map((row, index) => {

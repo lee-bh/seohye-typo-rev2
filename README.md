@@ -54,6 +54,11 @@ In `admin.html` only: clicking a card or a period label opens its editor, and
 dragging a period label up or down moves it between layers, writing straight
 back to the sheet.
 
+A write sends one request and then applies the change to the records already on
+screen, rather than re-reading both sheets each time. **再取得** pulls the sheets
+again — worth using if someone else may be editing at the same time, since the
+page will not notice their changes on its own.
+
 ## Running locally
 
 The page is static, but it fetches across origins, so serve it over HTTP
